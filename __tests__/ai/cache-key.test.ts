@@ -15,6 +15,7 @@ const BASE: CacheKeyInput = {
   decklistId: 'deck-1',
   decklistFingerprint: 'hash-1',
   screenName: 'Ash',
+  notes: 'I bricked on turn two.',
 };
 
 describe('buildAnalysisCacheKey', () => {
@@ -33,8 +34,17 @@ describe('buildAnalysisCacheKey', () => {
     ['linked decklist', { decklistId: 'deck-2' }],
     ['decklist contents', { decklistFingerprint: 'hash-2' }],
     ['screen name', { screenName: 'Misty' }],
+    // build-context injects these as <player_notes>, so they steer the output.
+    ['player notes', { notes: 'Actually I had the out and missed it.' }],
+    ['player notes being cleared', { notes: null }],
   ])('changes when the %s changes', (_label, patch) => {
     expect(buildAnalysisCacheKey({ ...BASE, ...patch })).not.toBe(buildAnalysisCacheKey(BASE));
+  });
+
+  it('treats an absent note and an empty note as the same input', () => {
+    expect(buildAnalysisCacheKey({ ...BASE, notes: null })).toBe(
+      buildAnalysisCacheKey({ ...BASE, notes: '' })
+    );
   });
 
   it('is case-insensitive on the screen name', () => {

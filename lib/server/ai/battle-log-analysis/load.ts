@@ -142,6 +142,7 @@ export async function loadAnalysisContext(
     decklistId: log.decklist_id,
     decklistFingerprint: fingerprint,
     screenName,
+    notes: log.notes,
   });
 
   return { log, battleLog, decklist, screenName, cacheKey };

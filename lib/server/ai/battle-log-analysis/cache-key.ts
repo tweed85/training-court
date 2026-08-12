@@ -6,7 +6,8 @@ import { createHash } from 'node:crypto';
  * Old rows are kept for comparison rather than deleted.
  */
 // 2: disabled Anthropic extended thinking and raised the output cap to 8k.
-export const ANALYSIS_PIPELINE_VERSION = 2;
+// 3: added the log's notes, which build-context injects as <player_notes>.
+export const ANALYSIS_PIPELINE_VERSION = 3;
 
 /**
  * Direct Anthropic model id, not the `anthropic/claude-sonnet-5` form the Vercel
@@ -37,6 +38,12 @@ export interface CacheKeyInput {
    * gets coached — and therefore the entire analysis.
    */
   screenName: string | null;
+  /**
+   * `logs.notes`. build-context feeds it to the model as <player_notes>, and it
+   * is freely editable, so leaving it out let an edited note return the previous
+   * analysis from cache without ever calling the model.
+   */
+  notes: string | null;
 }
 
 /**
@@ -55,6 +62,8 @@ export function buildAnalysisCacheKey(input: CacheKeyInput): string {
     `meta:${input.archetype ?? ''}|${input.oppArchetype ?? ''}|${input.format ?? ''}|${input.turnOrder ?? ''}|${input.result ?? ''}`,
     `deck:${input.decklistId ?? 'none'}:${input.decklistFingerprint ?? 'none'}`,
     `me:${(input.screenName ?? '').toLowerCase()}`,
+    // Hashed rather than inlined: notes are unbounded free text.
+    `notes:${sha256(input.notes ?? '')}`,
   ].join('\n');
 
   return sha256(canonical);
