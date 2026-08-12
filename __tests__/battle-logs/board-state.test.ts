@@ -122,7 +122,7 @@ describe('deriveBoardStates — evolution, attachments, damage', () => {
       log([
         turn([
           'ash played Dreepy to the Active Spot.',
-          "misty's Spidops used Rocket Rush on ash's Dreepy for 60 damage.",
+          "misty's Spidops used Rocket Rush on ash’s Dreepy for 60 damage.",
           'ash evolved Dreepy to Drakloak in the Active Spot.',
         ]),
       ])
@@ -134,8 +134,8 @@ describe('deriveBoardStates — evolution, attachments, damage', () => {
   it('accumulates damage across turns', () => {
     const boards = deriveBoardStates(
       log([
-        turn(['ash played Pikipek to the Active Spot.', "misty's Spidops used Rocket Rush on ash's Pikipek for 70 damage."]),
-        turn(["misty's Spidops used Rocket Rush on ash's Pikipek for 50 damage."]),
+        turn(['ash played Pikipek to the Active Spot.', "misty's Spidops used Rocket Rush on ash’s Pikipek for 70 damage."]),
+        turn(["misty's Spidops used Rocket Rush on ash’s Pikipek for 50 damage."]),
       ])
     );
     expect(boards[0].ash.active?.damage).toBe(70);
@@ -147,7 +147,7 @@ describe('deriveBoardStates — evolution, attachments, damage', () => {
       log([
         turn([
           'ash played Hoothoot to the Bench.',
-          "misty's Spidops used Rocket Rush on ash's Hoothoot for 150 damage.",
+          "misty's Spidops used Rocket Rush on ash’s Hoothoot for 150 damage.",
         ]),
       ])
     );
@@ -159,7 +159,7 @@ describe('deriveBoardStates — evolution, attachments, damage', () => {
       log([
         turn([
           'ash played Pikipek to the Active Spot.',
-          "misty's Spidops used Rocket Rush on ash's Pikipek for 150 damage.",
+          "misty's Spidops used Rocket Rush on ash’s Pikipek for 150 damage.",
           "ash's Pikipek was Knocked Out!",
           'ash played Pikipek to the Active Spot.',
         ]),
