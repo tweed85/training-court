@@ -1,6 +1,9 @@
 
 import type { BattleLog, BattleLogTurn } from '../../components/battle-logs/utils/battle-log.types';
 import { deriveBoardStates } from '../../components/battle-logs/utils/board-state';
+import { parseBattleLog } from '../../components/battle-logs/utils/battle-log.utils';
+import { battleLogNewStructure } from '../../components/battle-logs/utils/testing-files/battleLogNewStructure';
+import { battleLogGerman } from '../../components/battle-logs/utils/testing-files/battleLogGerman';
 
 const turn = (lines: string[]): BattleLogTurn => ({
   turnTitle: 'A Turn',
@@ -95,5 +98,118 @@ describe('deriveBoardStates — placement', () => {
       { title: 'ash played Nest Ball.', details: ['ash played Hoothoot to the Bench.'] },
     ];
     expect(deriveBoardStates(withDetail)[0].ash.bench.map((p) => p.name)).toEqual(['Hoothoot']);
+  });
+});
+
+describe('deriveBoardStates — evolution, attachments, damage', () => {
+  it('evolves in place on the bench and records the pre-evolution', () => {
+    const boards = deriveBoardStates(
+      log([turn(['ash played Dreepy to the Bench.', 'ash evolved Dreepy to Drakloak on the Bench.'])])
+    );
+    expect(boards[0].ash.bench[0].name).toBe('Drakloak');
+    expect(boards[0].ash.bench[0].evolvedFrom).toEqual(['Dreepy']);
+  });
+
+  it('evolves in the Active Spot', () => {
+    const boards = deriveBoardStates(
+      log([turn(['ash played Dreepy to the Active Spot.', 'ash evolved Dreepy to Drakloak in the Active Spot.'])])
+    );
+    expect(boards[0].ash.active?.name).toBe('Drakloak');
+  });
+
+  it('keeps damage across an evolution', () => {
+    const boards = deriveBoardStates(
+      log([
+        turn([
+          'ash played Dreepy to the Active Spot.',
+          "misty's Spidops used Rocket Rush on ash's Dreepy for 60 damage.",
+          'ash evolved Dreepy to Drakloak in the Active Spot.',
+        ]),
+      ])
+    );
+    expect(boards[0].ash.active?.damage).toBe(60);
+    expect(boards[0].ash.active?.name).toBe('Drakloak');
+  });
+
+  it('accumulates damage across turns', () => {
+    const boards = deriveBoardStates(
+      log([
+        turn(['ash played Pikipek to the Active Spot.', "misty's Spidops used Rocket Rush on ash's Pikipek for 70 damage."]),
+        turn(["misty's Spidops used Rocket Rush on ash's Pikipek for 50 damage."]),
+      ])
+    );
+    expect(boards[0].ash.active?.damage).toBe(70);
+    expect(boards[1].ash.active?.damage).toBe(120);
+  });
+
+  it('damages a benched Pokemon by name', () => {
+    const boards = deriveBoardStates(
+      log([
+        turn([
+          'ash played Hoothoot to the Bench.',
+          "misty's Spidops used Rocket Rush on ash's Hoothoot for 150 damage.",
+        ]),
+      ])
+    );
+    expect(boards[0].ash.bench[0].damage).toBe(150);
+  });
+
+  it('discards damage when a Pokemon is Knocked Out', () => {
+    const boards = deriveBoardStates(
+      log([
+        turn([
+          'ash played Pikipek to the Active Spot.',
+          "misty's Spidops used Rocket Rush on ash's Pikipek for 150 damage.",
+          "ash's Pikipek was Knocked Out!",
+          'ash played Pikipek to the Active Spot.',
+        ]),
+      ])
+    );
+    expect(boards[0].ash.active?.damage).toBe(0);
+  });
+
+  it('records attachments', () => {
+    const boards = deriveBoardStates(
+      log([
+        turn([
+          'ash played Pikipek to the Active Spot.',
+          'ash attached Basic Psychic Energy to Pikipek in the Active Spot.',
+        ]),
+      ])
+    );
+    expect(boards[0].ash.active?.attachments).toEqual(['Basic Psychic Energy']);
+  });
+
+  it('records a status condition', () => {
+    const boards = deriveBoardStates(
+      log([turn(['ash played Pikipek to the Active Spot.', "ash's Pikipek is now Poisoned."])])
+    );
+    expect(boards[0].ash.active?.status).toBe('Poisoned');
+  });
+});
+
+describe('deriveBoardStates — real fixtures', () => {
+  it('produces one board per section and never exceeds five benched', () => {
+    const parsed = parseBattleLog(battleLogNewStructure, 'l', '2026-01-01', null, null, 'Bassoonboy135', 'SVI-DRI');
+    const boards = deriveBoardStates(parsed);
+
+    expect(boards).toHaveLength(parsed.sections.length);
+    for (const board of boards) {
+      for (const player of Object.keys(board)) {
+        expect(board[player].bench.length).toBeLessThanOrEqual(5);
+      }
+    }
+  });
+
+  it('puts a Pokemon in play for both players by the end of setup', () => {
+    const parsed = parseBattleLog(battleLogNewStructure, 'l', '2026-01-01', null, null, 'Bassoonboy135', 'SVI-DRI');
+    const boards = deriveBoardStates(parsed);
+    const setup = boards[0];
+    expect(Object.values(setup).some((b) => b.active !== null)).toBe(true);
+  });
+
+  it('yields no board for a German log', () => {
+    const parsed = parseBattleLog(battleLogGerman, 'l', '2026-01-01', null, null, null, 'SVI-DRI');
+    expect(deriveBoardStates(parsed)).toEqual([]);
   });
 });

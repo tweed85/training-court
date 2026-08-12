@@ -52,6 +52,10 @@ export function deriveBoardStates(battleLog: BattleLog): BoardState[] {
     retreat: new RegExp(`^(${who}) retreated (.+) to the Bench\\.$`),
     knockout: new RegExp(`^(${who})${APOS}s (.+) was Knocked Out!$`),
     benchUnknown: new RegExp(`^(${who}) drew (\\d+) cards? and played them to the Bench\\.$`),
+    evolve: new RegExp(`^(${who}) evolved (.+) to (.+) (?:on the Bench|in the Active Spot)\\.$`),
+    attach: new RegExp(`^(${who}) attached (.+) to (.+) (?:in the Active Spot|on the Bench)\\.$`),
+    damage: new RegExp(`^(${who})${APOS}s (.+) used (.+) on (${who})${APOS}s (.+) for (\\d+) damage\\.$`),
+    status: new RegExp(`^(${who})${APOS}s (.+) is now (Asleep|Paralyzed|Confused|Poisoned|Burned)\\.$`),
   };
 
   const state: BoardState = {};
@@ -59,6 +63,12 @@ export function deriveBoardStates(battleLog: BattleLog): BoardState[] {
 
   const findOnBench = (board: PlayerBoard, name: string): number =>
     board.bench.findIndex((p) => p.name === name);
+
+  /** Find a Pokemon by name in either slot. Active is checked first. */
+  const findInPlay = (board: PlayerBoard, name: string): PokemonInPlay | undefined => {
+    if (board.active?.name === name) return board.active;
+    return board.bench.find((p) => p.name === name);
+  };
 
   const applyLine = (raw: string): void => {
     const line = raw.replace(/^[\s\-•]+/, '').trim();
@@ -111,6 +121,38 @@ export function deriveBoardStates(battleLog: BattleLog): BoardState[] {
         board.bench.push(board.active);
         board.active = null;
       }
+      return;
+    }
+
+    m = line.match(RE.evolve);
+    if (m) {
+      const target = findInPlay(state[m[1]], m[2]);
+      if (target) {
+        // Damage stays with the Pokemon through evolution, as in the real game.
+        target.evolvedFrom.push(target.name);
+        target.name = m[3];
+      }
+      return;
+    }
+
+    m = line.match(RE.attach);
+    if (m) {
+      const target = findInPlay(state[m[1]], m[3]);
+      if (target) target.attachments.push(m[2]);
+      return;
+    }
+
+    m = line.match(RE.damage);
+    if (m) {
+      const target = findInPlay(state[m[4]], m[5]);
+      if (target) target.damage += Number(m[6]);
+      return;
+    }
+
+    m = line.match(RE.status);
+    if (m) {
+      const target = findInPlay(state[m[1]], m[2]);
+      if (target) target.status = m[3];
       return;
     }
 
