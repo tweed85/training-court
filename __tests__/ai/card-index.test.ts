@@ -143,4 +143,15 @@ describe('findNearestCardName', () => {
   it('returns null when nothing is close', () => {
     expect(findNearestCardName('completely unrelated card', index)).toBeNull();
   });
+
+  /**
+   * Pins the real bound, which is weaker than "never corrects one real card
+   * into another": two real Pokemon that differ by two edits are indistinguish-
+   * able to this function. Callers that present the result as advice must not
+   * use it — see validate.ts, where only turningPoints does.
+   */
+  it('will correct one real card into a different real card', () => {
+    const nearby = buildCardIndex([card('Pidgeot'), card('Rare Candy')]);
+    expect(findNearestCardName('pidgey', nearby)?.name).toBe('Pidgeot');
+  });
 });

@@ -109,9 +109,17 @@ export function extractCardNamesFromLog(logText: string, index: CardIndex): Extr
 }
 
 /**
- * Conservative fuzzy fallback for model output that is one character off a real
- * name. Bounded to short edit distances on long names so we never "correct" one
- * real card into a different real card.
+ * Fuzzy fallback for model output that is a character or two off a real name.
+ *
+ * The bounds — six characters minimum, a length difference of at most two, an
+ * edit distance of at most two — cut the false-positive rate but do NOT make a
+ * correction safe. Real cards sit within distance 2 of each other: `pidgey` →
+ * `pidgeot`, `basic fire energy` → `basic fairy energy`. A hallucinated name can
+ * therefore be rewritten into a different, real, allowed card.
+ *
+ * Only call this where being wrong about a name is cosmetic. Prescriptive
+ * output ("play X on turn 4") must resolve exactly or be dropped, because a
+ * corrected name there is advice the player never had a reason to follow.
  */
 export function findNearestCardName(key: string, index: CardIndex): DeckbuilderCatalogCard | null {
   if (key.length < 6) return null;

@@ -21,11 +21,14 @@ export interface ValidationResult {
 /**
  * Filter the model's output down to claims we can substantiate.
  *
- * The asymmetry here is deliberate. Descriptive prose keeps its turning point
- * even if a card name is unresolvable, because being wrong about a name in a
- * recap is cosmetic. Prescriptive advice ("you should have played X") is dropped
- * whole when X is not demonstrably available, because a suggestion the player
- * could not have made is worse than no suggestion at all.
+ * The asymmetry here is deliberate, and it runs through both the fuzzy matcher
+ * and the availability check. Descriptive prose keeps its turning point even if
+ * a card name is unresolvable, and may have a near-miss name repaired, because
+ * being wrong about a name in a recap is cosmetic. Prescriptive advice ("you
+ * should have played X") gets neither concession: X must resolve exactly and be
+ * demonstrably available, or the whole suggestion goes. Fuzzy matching is the
+ * dangerous half — its bounds admit `pidgey` → `pidgeot`, so it can turn a
+ * hallucination into a real card and hand it back as substantiated advice.
  */
 export function validateAnalysis(
   analysis: BattleLogAnalysis,
@@ -36,8 +39,15 @@ export function validateAnalysis(
   let attempts = 0;
   let failures = 0;
 
-  /** exact → normalized → conservative fuzzy. Returns the canonical name or null. */
-  const resolve = (raw: string, where: string): string | null => {
+  /**
+   * exact → normalized, then optionally a bounded fuzzy match. Returns the
+   * canonical name or null.
+   *
+   * `fuzzy` is opt-in per call site rather than a default, because the fuzzy
+   * path can rewrite one real card into another and callers differ on whether
+   * that is acceptable.
+   */
+  const resolve = (raw: string, where: string, fuzzy: boolean): string | null => {
     attempts += 1;
     const key = normalizeCardName(raw);
 
@@ -47,10 +57,12 @@ export function validateAnalysis(
       return hit.name;
     }
 
-    const near = findNearestCardName(key, context.allowedCards);
-    if (near) {
-      warnings.push({ code: 'card_corrected', from: raw, to: near.name, where });
-      return near.name;
+    if (fuzzy) {
+      const near = findNearestCardName(key, context.allowedCards);
+      if (near) {
+        warnings.push({ code: 'card_corrected', from: raw, to: near.name, where });
+        return near.name;
+      }
     }
 
     failures += 1;
@@ -64,25 +76,28 @@ export function validateAnalysis(
     return false;
   };
 
-  // Turning points: descriptive. Drop unresolvable names, keep the point.
+  // Turning points: descriptive. Drop unresolvable names, keep the point, and
+  // allow a near miss to be repaired — the worst case is a cosmetically wrong
+  // name in a recap the reader can check against the log below it.
   const turningPoints = analysis.turningPoints
     .filter((point) => inRange(point.turnNumber, 'turningPoints'))
     .map((point) => ({
       ...point,
       cardsInvolved: point.cardsInvolved
-        .map((name) => resolve(name, 'turningPoints'))
+        .map((name) => resolve(name, 'turningPoints', true))
         .filter((name): name is string => name !== null),
     }));
 
-  // Tactical suggestions: prescriptive. Every named card must be one the player
-  // demonstrably had, or the whole suggestion goes.
+  // Tactical suggestions: prescriptive. Every named card must resolve exactly —
+  // no fuzzy repair — and be one the player demonstrably had, or the whole
+  // suggestion goes.
   const tacticalSuggestions = analysis.tacticalSuggestions
     .filter((suggestion) => inRange(suggestion.turnNumber, 'tacticalSuggestions'))
     .flatMap((suggestion) => {
       const resolvedNames: string[] = [];
 
       for (const raw of suggestion.cardsInvolved) {
-        const canonical = resolve(raw, 'tacticalSuggestions');
+        const canonical = resolve(raw, 'tacticalSuggestions', false);
         if (!canonical) {
           warnings.push({
             code: 'suggestion_dropped',
@@ -108,7 +123,8 @@ export function validateAnalysis(
       return [{ ...suggestion, cardsInvolved: resolvedNames }];
     });
 
-  // Deck suggestions require a decklist to be falsifiable at all.
+  // Deck suggestions require a decklist to be falsifiable at all, and are
+  // prescriptive, so they resolve exactly for the same reason.
   let deckSuggestions: BattleLogAnalysis['deckSuggestions'] = [];
 
   if (!context.decklistCards.size) {
@@ -121,7 +137,7 @@ export function validateAnalysis(
   } else {
     deckSuggestions = analysis.deckSuggestions.flatMap((suggestion) => {
       const cardsOut = suggestion.cardsOut.flatMap((entry) => {
-        const canonical = resolve(entry.name, 'deckSuggestions.cardsOut');
+        const canonical = resolve(entry.name, 'deckSuggestions.cardsOut', false);
         if (!canonical) return [];
         if (!context.decklistCards.has(normalizeCardName(canonical))) {
           warnings.push({ code: 'card_not_in_decklist', name: canonical, where: 'deckSuggestions.cardsOut' });
@@ -131,7 +147,7 @@ export function validateAnalysis(
       });
 
       const cardsIn = suggestion.cardsIn.flatMap((entry) => {
-        const canonical = resolve(entry.name, 'deckSuggestions.cardsIn');
+        const canonical = resolve(entry.name, 'deckSuggestions.cardsIn', false);
         return canonical ? [{ ...entry, name: canonical }] : [];
       });
 

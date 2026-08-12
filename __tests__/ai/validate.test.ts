@@ -20,13 +20,16 @@ const CATALOG = [
   // In the catalog but NOT in the player's deck or hand.
   card('Fezandipiti ex'),
   card('Dusknoir'),
+  // Sits within edit distance 2 of "Pidgey", which is NOT in the catalog. The
+  // fuzzy matcher will happily turn one into the other.
+  card('Pidgeot'),
 ];
 
 const context = (overrides: Partial<AnalysisContext> = {}): AnalysisContext => ({
   userPrompt: '',
   allowedCards: buildCardIndex(CATALOG),
-  userAccessibleCards: new Set(["boss's orders", 'iono', 'nest ball', 'earthen vessel']),
-  decklistCards: new Set(["boss's orders", 'iono', 'nest ball', 'earthen vessel']),
+  userAccessibleCards: new Set(["boss's orders", 'iono', 'nest ball', 'earthen vessel', 'pidgeot']),
+  decklistCards: new Set(["boss's orders", 'iono', 'nest ball', 'earthen vessel', 'pidgeot']),
   grounding: {
     level: 'full',
     language: 'en',
@@ -118,6 +121,28 @@ describe('validateAnalysis — tactical suggestions', () => {
     );
   });
 
+  /**
+   * The bounds on findNearestCardName are not tight enough to keep one real
+   * card from becoming another — "Pidgey" is two edits from "Pidgeot". Letting
+   * that through here would hand the player advice about a card the model never
+   * named, wearing the validator's stamp of approval.
+   */
+  it('drops a suggestion rather than fuzzy-correcting the card it names', () => {
+    const result = validateAnalysis(
+      analysis({ tacticalSuggestions: [tactical(['Pidgey'])] }),
+      context(),
+      20
+    );
+
+    expect(result.analysis.tacticalSuggestions).toHaveLength(0);
+    expect(result.warnings).toContainEqual(
+      expect.objectContaining({ code: 'card_not_in_catalog', name: 'Pidgey' })
+    );
+    expect(result.warnings).not.toContainEqual(
+      expect.objectContaining({ code: 'card_corrected', to: 'Pidgeot' })
+    );
+  });
+
   it('drops a suggestion citing a turn that does not exist', () => {
     const result = validateAnalysis(
       analysis({ tacticalSuggestions: [tactical(["Boss's Orders"], 99)] }),
@@ -153,6 +178,32 @@ describe('validateAnalysis — turning points', () => {
 
     expect(result.analysis.turningPoints).toHaveLength(1);
     expect(result.analysis.turningPoints[0].cardsInvolved).toEqual(['Iono']);
+  });
+
+  // The other half of the asymmetry: descriptive text keeps the repair, because
+  // the reader can check the name against the log printed beside it.
+  it('fuzzy-corrects a near-miss card name', () => {
+    const result = validateAnalysis(
+      analysis({
+        turningPoints: [
+          {
+            turnNumber: 7,
+            turnLabel: "Ash's Turn",
+            whatHappened: 'Something.',
+            whyItMattered: 'Because.',
+            swing: 'favor_opponent',
+            cardsInvolved: ['Pidgey'],
+          },
+        ],
+      }),
+      context(),
+      20
+    );
+
+    expect(result.analysis.turningPoints[0].cardsInvolved).toEqual(['Pidgeot']);
+    expect(result.warnings).toContainEqual(
+      expect.objectContaining({ code: 'card_corrected', from: 'Pidgey', to: 'Pidgeot' })
+    );
   });
 
   it('never rewrites prose', () => {
@@ -196,6 +247,32 @@ describe('validateAnalysis — deck suggestions', () => {
     expect(result.analysis.deckSuggestions).toHaveLength(0);
     expect(result.warnings).toContainEqual(
       expect.objectContaining({ code: 'card_not_in_decklist', name: 'Fezandipiti ex' })
+    );
+  });
+
+  it('drops a swap rather than fuzzy-correcting the card it cuts', () => {
+    const result = validateAnalysis(
+      analysis({ deckSuggestions: [swap(['Dusknoir'], ['Pidgey'])] }),
+      context(),
+      20
+    );
+
+    expect(result.analysis.deckSuggestions).toHaveLength(0);
+    expect(result.warnings).not.toContainEqual(
+      expect.objectContaining({ code: 'card_corrected', to: 'Pidgeot' })
+    );
+  });
+
+  it('drops an added card rather than fuzzy-correcting it', () => {
+    const result = validateAnalysis(
+      analysis({ deckSuggestions: [swap(['Pidgey'], ['Nest Ball'])] }),
+      context(),
+      20
+    );
+
+    expect(result.analysis.deckSuggestions[0]?.cardsIn ?? []).toHaveLength(0);
+    expect(result.warnings).toContainEqual(
+      expect.objectContaining({ code: 'card_not_in_catalog', name: 'Pidgey' })
     );
   });
 
