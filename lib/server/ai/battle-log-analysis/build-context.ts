@@ -44,6 +44,25 @@ export interface AnalysisContext {
 
 const BASIC_ENERGY = /^basic\s+\w+\s+energy$/i;
 
+/**
+ * Neutralize markup inside a block whose contents the user controls.
+ *
+ * Every string here belongs to the requesting user and the analysis goes back
+ * only to them, so a crafted log is self-directed rather than an attack on
+ * anyone else. It is still worth closing: a log or note containing a literal
+ * `</match_log>` would end the block early and let whatever follows read as
+ * framing rather than as quoted evidence.
+ *
+ * Only `<` is rewritten. That is enough to stop any tag from forming, and it
+ * leaves the rest of the user's text — which the model is meant to read
+ * verbatim — untouched.
+ */
+const escapeUntrustedBlock = (value: string): string => value.replace(/</g, '&lt;');
+
+/** Attribute values are quoted, so a deck named `x" y="` would break out. */
+const escapeAttribute = (value: string): string =>
+  value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+
 /** Card text is expensive; basic energy carries none worth spending tokens on. */
 const renderCardLine = (name: string, qty: number | null, card?: DeckbuilderCatalogCard): string => {
   const prefix = qty === null ? '' : `${qty} `;
@@ -157,7 +176,7 @@ export function buildAnalysisContext(input: BuildContextInput): AnalysisContext 
 
   if (decklist && hasDecklist) {
     sections.push(
-      `<decklist name="${decklist.name}" untrusted="true">\n${renderDecklist(decklist.cards, index)}\n</decklist>`
+      `<decklist name="${escapeAttribute(decklist.name)}" untrusted="true">\n${escapeUntrustedBlock(renderDecklist(decklist.cards, index))}\n</decklist>`
     );
   } else {
     sections.push(
@@ -178,11 +197,13 @@ export function buildAnalysisContext(input: BuildContextInput): AnalysisContext 
   }
 
   sections.push(
-    `<match_log untrusted="true" turns_total="${compacted.turnsTotal}" turns_summarized="${compacted.turnsCompacted}">\n${compacted.text}\n</match_log>`
+    `<match_log untrusted="true" turns_total="${compacted.turnsTotal}" turns_summarized="${compacted.turnsCompacted}">\n${escapeUntrustedBlock(compacted.text)}\n</match_log>`
   );
 
   if (logRow.notes?.trim()) {
-    sections.push(`<player_notes untrusted="true">\n${logRow.notes.trim()}\n</player_notes>`);
+    sections.push(
+      `<player_notes untrusted="true">\n${escapeUntrustedBlock(logRow.notes.trim())}\n</player_notes>`
+    );
   }
 
   sections.push(`Analyze this match for ${battleLog.players[0]?.name ?? 'the analyzed player'}.`);
