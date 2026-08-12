@@ -76,7 +76,10 @@ export function LogPageClient({ logId, requireAuth = false }: LogPageClientProps
   const isOwnLog = Boolean(user && logData.user === user.id);
 
   return (
-    <div className="flex-1 flex flex-col w-full h-full sm:max-w-lg justify-between gap-2 p-4">
+    // `sm:max-w-lg` capped the page at 512px and never grew, so a 1512px desktop
+    // spent two thirds of its width on nothing. The ladder widens with the
+    // viewport; prose inside caps its own measure so lines stay readable.
+    <div className="flex-1 flex flex-col w-full h-full max-w-lg md:max-w-2xl lg:max-w-4xl xl:max-w-6xl mx-auto justify-between gap-2 p-4 lg:px-8 lg:py-6">
       <div className="flex flex-col gap-8">
         <div className="flex flex-col items-center gap-4">
           <div className="flex items-center justify-evenly w-full">

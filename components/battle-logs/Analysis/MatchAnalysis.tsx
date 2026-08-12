@@ -156,10 +156,10 @@ function AnalysisBody({ analysis }: { analysis: NonNullable<MatchAnalysisRespons
   const gt = useGT();
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex max-w-prose flex-col gap-6">
       <section className="flex flex-col gap-1">
         <h3 className="font-semibold">{analysis.matchSummary.headline}</h3>
-        <p className="text-sm text-muted-foreground whitespace-pre-wrap">
+        <p className="text-sm text-foreground/80 whitespace-pre-wrap">
           {analysis.matchSummary.narrative}
         </p>
       </section>
@@ -174,8 +174,8 @@ function AnalysisBody({ analysis }: { analysis: NonNullable<MatchAnalysisRespons
               <span className="font-medium">
                 {gt('Turn', { $id: 'battleLogs.analysis.turn' })} {point.turnNumber}
               </span>
-              <p className="text-muted-foreground">{point.whatHappened}</p>
-              <p className="text-muted-foreground">{point.whyItMattered}</p>
+              <p className="text-foreground/80">{point.whatHappened}</p>
+              <p className="text-foreground/80">{point.whyItMattered}</p>
             </div>
           ))}
         </section>
@@ -191,9 +191,9 @@ function AnalysisBody({ analysis }: { analysis: NonNullable<MatchAnalysisRespons
               <span className="font-medium">
                 {gt('Turn', { $id: 'battleLogs.analysis.turn' })} {suggestion.turnNumber}
               </span>
-              <p className="text-muted-foreground">{suggestion.actualPlay}</p>
+              <p className="text-foreground/70">{suggestion.actualPlay}</p>
               <p className={CONFIDENCE_STYLES[suggestion.confidence]}>{suggestion.suggestedPlay}</p>
-              <p className="text-muted-foreground text-xs">{suggestion.rationale}</p>
+              <p className="text-xs text-foreground/70">{suggestion.rationale}</p>
               {suggestion.requiresSearchOrDraw && (
                 <span className="text-xs text-muted-foreground italic">
                   {gt('Depends on finding the card that turn.', {
@@ -214,7 +214,7 @@ function AnalysisBody({ analysis }: { analysis: NonNullable<MatchAnalysisRespons
           {analysis.deckSuggestions.map((suggestion, index) => (
             <div key={index} className="text-sm flex flex-col gap-1">
               <p className="font-medium">{formatDeckChange(suggestion)}</p>
-              <p className="text-muted-foreground text-xs">{suggestion.rationale}</p>
+              <p className="text-xs text-foreground/70">{suggestion.rationale}</p>
             </div>
           ))}
         </section>
