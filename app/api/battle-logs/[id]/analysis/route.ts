@@ -30,6 +30,8 @@ type AnalysisRow = {
   grounding: unknown;
   error_code: string | null;
   created_at: string;
+  /** Maintained by the `battle_log_analyses_set_updated_at` trigger. */
+  updated_at: string;
 };
 
 const analysisPayload = (row: AnalysisRow | null, stale: boolean) => ({
@@ -91,6 +93,10 @@ function adminClientOr500() {
 /**
  * Flip rows abandoned by a killed function so the client sees a retryable
  * failure instead of an analysis that never arrives.
+ *
+ * Keyed on `updated_at`, not `created_at`: re-claiming a row upserts it back to
+ * `pending` without touching `created_at`, so an age measured from creation
+ * would reap a generation that started seconds ago.
  */
 async function reapStalePending(admin: ReturnType<typeof createAdminClient>, logId: string) {
   await admin
@@ -98,7 +104,7 @@ async function reapStalePending(admin: ReturnType<typeof createAdminClient>, log
     .update({ status: 'failed', error_code: 'timeout' })
     .eq('log_id', logId)
     .eq('status', 'pending')
-    .lt('created_at', new Date(Date.now() - STALE_PENDING_MS).toISOString());
+    .lt('updated_at', new Date(Date.now() - STALE_PENDING_MS).toISOString());
 }
 
 export async function GET(
@@ -116,7 +122,7 @@ export async function GET(
 
   const { data } = await admin
     .from('battle_log_analyses')
-    .select('id, status, cache_key, result, warnings, grounding, error_code, created_at')
+    .select('id, status, cache_key, result, warnings, grounding, error_code, created_at, updated_at')
     .eq('log_id', params.id)
     .order('created_at', { ascending: false })
     .limit(1)
@@ -152,7 +158,7 @@ export async function POST(
   // Cheapest path first: an identical analysis already exists.
   const { data: cachedData } = await admin
     .from('battle_log_analyses')
-    .select('id, status, cache_key, result, warnings, grounding, error_code, created_at')
+    .select('id, status, cache_key, result, warnings, grounding, error_code, created_at, updated_at')
     .eq('log_id', params.id)
     .eq('cache_key', cacheKey)
     .maybeSingle();
@@ -163,9 +169,12 @@ export async function POST(
     return Response.json(analysisPayload(cached, false));
   }
 
+  // `updated_at` rather than `created_at`: the claiming upsert leaves the
+  // original `created_at` in place on conflict, so a row that has already failed
+  // once would never look recent again and every retry would double-generate.
   if (
     cached?.status === 'pending' &&
-    Date.now() - new Date(cached.created_at).getTime() < TIMEOUT_MS
+    Date.now() - new Date(cached.updated_at).getTime() < TIMEOUT_MS
   ) {
     // A concurrent request is already generating this exact analysis.
     return Response.json(analysisPayload(cached, false), { status: 202 });
@@ -238,7 +247,7 @@ export async function POST(
       })
       .eq('log_id', params.id)
       .eq('cache_key', cacheKey)
-      .select('id, status, cache_key, result, warnings, grounding, error_code, created_at')
+      .select('id, status, cache_key, result, warnings, grounding, error_code, created_at, updated_at')
       .maybeSingle();
 
     // `saved` is null when the log was deleted mid-generation and the row

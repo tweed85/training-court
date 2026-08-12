@@ -112,12 +112,17 @@ function makeUserClient(options: {
 function makeAdminClient(options: { existing?: unknown; updated?: unknown } = {}) {
   const updates: unknown[] = [];
   const upserts: unknown[] = [];
+  /** Which column the stale-pending reaper measures age against. */
+  const ltCalls: [string, unknown][] = [];
 
   const chain = (): any => {
     const self: any = {
       select: () => self,
       eq: () => self,
-      lt: () => self,
+      lt: (column: string, value: unknown) => {
+        ltCalls.push([column, value]);
+        return self;
+      },
       order: () => self,
       limit: () => self,
       maybeSingle: async () => ({ data: options.existing ?? null }),
@@ -125,7 +130,10 @@ function makeAdminClient(options: { existing?: unknown; updated?: unknown } = {}
         updates.push(payload);
         const afterUpdate: any = {
           eq: () => afterUpdate,
-          lt: () => afterUpdate,
+          lt: (column: string, value: unknown) => {
+            ltCalls.push([column, value]);
+            return afterUpdate;
+          },
           select: () => afterUpdate,
           maybeSingle: async () => ({ data: options.updated ?? null }),
           then: (resolve: (v: unknown) => unknown) => resolve({ data: null }),
@@ -144,8 +152,10 @@ function makeAdminClient(options: { existing?: unknown; updated?: unknown } = {}
     return self;
   };
 
-  return { client: { from: () => chain() }, updates, upserts };
+  return { client: { from: () => chain() }, updates, upserts, ltCalls };
 }
+
+const OLD = '2026-01-01T00:00:00Z';
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -325,7 +335,8 @@ describe('POST /api/battle-logs/[id]/analysis — caching', () => {
           warnings: [],
           grounding: {},
           error_code: null,
-          created_at: '2026-01-01T00:00:00Z',
+          created_at: OLD,
+          updated_at: OLD,
         },
       }).client
     );
@@ -358,7 +369,8 @@ describe('POST /api/battle-logs/[id]/analysis — caching', () => {
           warnings: [],
           grounding: {},
           error_code: null,
-          created_at: new Date().toISOString(),
+          created_at: OLD,
+          updated_at: new Date().toISOString(),
         },
       }).client
     );
@@ -367,6 +379,83 @@ describe('POST /api/battle-logs/[id]/analysis — caching', () => {
 
     expect(response.status).toBe(202);
     expect(generateAnalysis).not.toHaveBeenCalled();
+  });
+
+  // The claiming upsert carries no `created_at`, so ON CONFLICT leaves the
+  // original value behind. A row re-claimed after a failure therefore looks
+  // ancient by creation date while being seconds old by update date; keying the
+  // guard on creation let a second click start a second billed generation.
+  it('202s on a re-claimed row whose created_at is old but updated_at is fresh', async () => {
+    createClient.mockReturnValue(makeUserClient({ userId: ADMIN_ID, logRow: LOG_ROW }));
+
+    const probe = makeAdminClient();
+    createAdminClient.mockReturnValue(probe.client);
+    await POST(REQUEST, { params: { id: LOG_ID } });
+    const cacheKey = (probe.upserts[0] as { cache_key: string }).cache_key;
+
+    jest.clearAllMocks();
+    getAllDeckbuilderCards.mockResolvedValue([]);
+    createClient.mockReturnValue(makeUserClient({ userId: ADMIN_ID, logRow: LOG_ROW }));
+    createAdminClient.mockReturnValue(
+      makeAdminClient({
+        existing: {
+          id: 'row-1',
+          status: 'pending',
+          cache_key: cacheKey,
+          result: null,
+          warnings: [],
+          grounding: {},
+          error_code: null,
+          // The failed first attempt, months ago.
+          created_at: OLD,
+          // The retry that is running right now.
+          updated_at: new Date().toISOString(),
+        },
+      }).client
+    );
+
+    const response = await POST(REQUEST, { params: { id: LOG_ID } });
+
+    expect(response.status).toBe(202);
+    expect(generateAnalysis).not.toHaveBeenCalled();
+  });
+
+  it('re-claims a pending row that has genuinely gone stale', async () => {
+    createClient.mockReturnValue(makeUserClient({ userId: ADMIN_ID, logRow: LOG_ROW }));
+
+    const probe = makeAdminClient();
+    createAdminClient.mockReturnValue(probe.client);
+    await POST(REQUEST, { params: { id: LOG_ID } });
+    const cacheKey = (probe.upserts[0] as { cache_key: string }).cache_key;
+
+    jest.clearAllMocks();
+    getAllDeckbuilderCards.mockResolvedValue([]);
+    generateAnalysis.mockResolvedValue({
+      analysis: ANALYSIS,
+      inputTokens: 1,
+      outputTokens: 1,
+      latencyMs: 1,
+    });
+    createClient.mockReturnValue(makeUserClient({ userId: ADMIN_ID, logRow: LOG_ROW }));
+    createAdminClient.mockReturnValue(
+      makeAdminClient({
+        existing: {
+          id: 'row-1',
+          status: 'pending',
+          cache_key: cacheKey,
+          result: null,
+          warnings: [],
+          grounding: {},
+          error_code: null,
+          created_at: OLD,
+          updated_at: OLD,
+        },
+      }).client
+    );
+
+    await POST(REQUEST, { params: { id: LOG_ID } });
+
+    expect(generateAnalysis).toHaveBeenCalled();
   });
 
   it('writes a pending row before calling the model', async () => {
@@ -432,7 +521,8 @@ describe('GET /api/battle-logs/[id]/analysis', () => {
           warnings: [],
           grounding: {},
           error_code: null,
-          created_at: '2026-01-01T00:00:00Z',
+          created_at: OLD,
+          updated_at: OLD,
         },
       }).client
     );
@@ -451,6 +541,21 @@ describe('GET /api/battle-logs/[id]/analysis', () => {
     expect(response.status).toBe(403);
   });
 
+  // Measuring from `created_at` would flip an actively running retry to failed,
+  // because a re-claimed row keeps the creation date of the attempt before it.
+  it('ages out stale pending rows by updated_at, not created_at', async () => {
+    createClient.mockReturnValue(makeUserClient({ userId: ADMIN_ID, logRow: LOG_ROW }));
+    const admin = makeAdminClient();
+    createAdminClient.mockReturnValue(admin.client);
+
+    await GET(REQUEST, { params: { id: LOG_ID } });
+
+    expect(admin.ltCalls.map(([column]) => column)).toEqual(['updated_at']);
+    expect(admin.updates).toContainEqual(
+      expect.objectContaining({ status: 'failed', error_code: 'timeout' })
+    );
+  });
+
   // A re-claimed row keeps its old `result` until the new generation lands, so
   // a failed retry must not hand the previous analysis back to the UI.
   it('never returns a body for a failed row', async () => {
@@ -465,7 +570,8 @@ describe('GET /api/battle-logs/[id]/analysis', () => {
           warnings: [{ code: 'low_grounding' }],
           grounding: {},
           error_code: 'gateway_error',
-          created_at: '2026-01-01T00:00:00Z',
+          created_at: OLD,
+          updated_at: OLD,
         },
       }).client
     );
