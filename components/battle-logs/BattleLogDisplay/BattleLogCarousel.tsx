@@ -1,3 +1,5 @@
+'use client';
+
 import * as React from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import {
@@ -16,13 +18,37 @@ import {
 import { BattleLog, BattleLogTurn } from "../utils/battle-log.types"
 import { cn } from "@/lib/utils";
 import { BattleLogDetectedStrings } from "@/lib/i18n/battle-log"
+import { deriveBoardStates } from "../utils/board-state"
+import { BoardStateView } from "../Board/BoardStateView"
+import { useCardLookup } from "../Board/useCardLookup"
 
 interface BattleLogCarouselProps {
   battleLog: BattleLog;
 }
 
 export function BattleLogCarousel(props: BattleLogCarouselProps) {
-    
+    // Empty for non-English logs: the board grammar is English-only, and a
+    // wrong board is worse than none.
+    const boards = React.useMemo(
+      () => deriveBoardStates(props.battleLog),
+      [props.battleLog]
+    );
+
+    const cardNames = React.useMemo(() => {
+      const names = new Set<string>();
+      for (const board of boards) {
+        for (const player of Object.values(board)) {
+          if (player.active && !player.active.unknown) names.add(player.active.name);
+          for (const benched of player.bench) {
+            if (!benched.unknown) names.add(benched.name);
+          }
+        }
+      }
+      return Array.from(names);
+    }, [boards]);
+
+    const cards = useCardLookup(cardNames);
+
     function getCardBackgroundColor(index: number, section: BattleLogTurn): string | undefined {
         if (index % 2 == 0 && !section.turnTitle.includes(BattleLogDetectedStrings[props.battleLog.language].setup)) {
             return 'bg-blue-100 dark:bg-blue-900';
@@ -54,6 +80,7 @@ export function BattleLogCarousel(props: BattleLogCarouselProps) {
               )}
             </CardHeader>
             <CardContent>
+              {boards[index] && <BoardStateView board={boards[index]} cards={cards} />}
               {section.actions.map((action) => action.details.length === 0 ? (
                 <p className="py-1">{action.title}</p>
               ) : (
