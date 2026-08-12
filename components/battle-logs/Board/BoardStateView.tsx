@@ -109,8 +109,13 @@ function PlayerRow({
 }
 
 export function BoardStateView({ board, cards }: BoardStateViewProps) {
+  const gt = useGT();
+
   return (
     <div className="flex flex-col gap-3 py-2" data-testid="board-state">
+      <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        {gt('Board', { $id: 'battleLogs.board.title' })}
+      </span>
       {Object.entries(board).map(([playerName, playerBoard]) => (
         <PlayerRow
           key={playerName}
