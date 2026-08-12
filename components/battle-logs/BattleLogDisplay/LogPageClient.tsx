@@ -70,9 +70,10 @@ export function LogPageClient({ logId, requireAuth = false }: LogPageClientProps
     logData.decklist_id
   );
 
-  const isOwnLog = Boolean(
-    user && userData?.live_screen_name && userData.live_screen_name === battleLog.players[0].name
-  );
+  // The row owner, not the screen name. Screen names are self-assigned, so
+  // matching on one let anybody who set theirs to another player's PTCGL handle
+  // render the Notes and Analysis panels on that person's public log.
+  const isOwnLog = Boolean(user && logData.user === user.id);
 
   return (
     <div className="flex-1 flex flex-col w-full h-full sm:max-w-lg justify-between gap-2 p-4">
