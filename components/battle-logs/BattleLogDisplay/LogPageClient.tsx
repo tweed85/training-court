@@ -11,6 +11,8 @@ import { Database } from '@/database.types';
 import { Sprite } from '@/components/archetype/sprites/Sprite';
 import { BattleLogCarousel } from './BattleLogCarousel';
 import { Notes } from '@/components/battle-logs/Notes/Notes';
+import { MatchAnalysis } from '@/components/battle-logs/Analysis/MatchAnalysis';
+import { isPremiumUser } from '@/components/premium/premium.utils';
 import { parseBattleLog } from '@/components/battle-logs/utils/battle-log.utils';
 
 type LogRow = Database['public']['Tables']['logs']['Row'];
@@ -64,7 +66,12 @@ export function LogPageClient({ logId, requireAuth = false }: LogPageClientProps
     logData.archetype,
     logData.opp_archetype,
     userData?.live_screen_name ?? null,
-    logData.format
+    logData.format,
+    logData.decklist_id
+  );
+
+  const isOwnLog = Boolean(
+    user && userData?.live_screen_name && userData.live_screen_name === battleLog.players[0].name
   );
 
   return (
@@ -85,9 +92,8 @@ export function LogPageClient({ logId, requireAuth = false }: LogPageClientProps
             {formatDistanceToNowStrict(battleLog.date)} ago
           </h3>
         </div>
-        {user && userData?.live_screen_name && (userData.live_screen_name === battleLog.players[0].name) && (
-          <Notes logId={logData.id} serverLoadedNotes={logData.notes} />
-        )}
+        {isOwnLog && <Notes logId={logData.id} serverLoadedNotes={logData.notes} />}
+        {isOwnLog && isPremiumUser(user?.id) && <MatchAnalysis logId={logData.id} />}
         <div className="mt-6">
           <BattleLogCarousel battleLog={battleLog} />
         </div>
