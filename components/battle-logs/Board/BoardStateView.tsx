@@ -1,7 +1,15 @@
 'use client';
 
 import Image from 'next/image';
+import { Wrench } from 'lucide-react';
 import { useGT } from 'gt-react';
+import {
+  ENERGY_ABBREVIATION,
+  ENERGY_STYLE,
+  SPECIAL_ENERGY_ABBREVIATION,
+  SPECIAL_ENERGY_STYLE,
+  classifyAttachment,
+} from './attachment';
 import type { BoardState, PokemonInPlay } from '../utils/board-state.types';
 import type { LookupCard } from '@/app/api/ptcg/cards/lookup/route';
 
@@ -58,6 +66,7 @@ function CardSlot({
 
   return (
     <div className={`${width} flex flex-col items-center gap-1`}>
+      <div className="relative w-full">
       {card?.imageUrl ? (
         <Image
           src={card.imageUrl}
@@ -74,6 +83,8 @@ function CardSlot({
           {pokemon.name}
         </div>
       )}
+        <AttachmentChips attachments={pokemon.attachments} large={large} />
+      </div>
 
       {remaining !== undefined && maxHp !== undefined && (
         <>
@@ -87,9 +98,87 @@ function CardSlot({
         </>
       )}
 
-      {pokemon.attachments.length > 0 && (
-        <span className="text-[10px] text-muted-foreground lg:text-xs">
-          {gt('Attached', { $id: 'battleLogs.board.attached' })}: {pokemon.attachments.length}
+
+    </div>
+  );
+}
+
+/** How many chips fit legibly across a bench card before they crowd the art. */
+const MAX_VISIBLE_CHIPS = 4;
+
+/**
+ * Attached energy and tools, drawn over the bottom of the card art.
+ *
+ * Shape carries the distinction before colour does — energy is a circle, a tool
+ * is a rounded square with a wrench — so the two stay separable in greyscale and
+ * for colour-blind readers. Energy letters are the standard TCG shorthand
+ * (R for fire, Y for fairy, N for dragon), which players already read on
+ * decklists, so the row needs no legend.
+ */
+function AttachmentChips({ attachments, large }: { attachments: string[]; large?: boolean }) {
+  const gt = useGT();
+  if (attachments.length === 0) return null;
+
+  const classified = attachments.map(classifyAttachment);
+  const visible = classified.slice(0, MAX_VISIBLE_CHIPS);
+  const overflow = classified.length - visible.length;
+
+  return (
+    <div
+      className="absolute inset-x-0 bottom-0 flex flex-wrap items-center gap-1 rounded-b-md bg-gradient-to-t from-black/80 via-black/45 to-transparent px-1.5 pb-1.5 pt-5"
+      role="list"
+      aria-label={`${gt('Attached', { $id: 'battleLogs.board.attached' })}: ${attachments.join(', ')}`}
+      data-testid="attachment-chips"
+    >
+      {visible.map((attachment, index) => {
+        // A white outline plus a drop shadow makes each chip read as a sticker
+        // sitting on the art, rather than blending into whatever is behind it.
+        const size = large
+          ? 'h-5 w-5 text-[10px] lg:h-6 lg:w-6 lg:text-xs'
+          : 'h-4 w-4 text-[9px] lg:h-5 lg:w-5 lg:text-[10px]';
+        const shared = `flex items-center justify-center font-bold leading-none ring-1 ring-white/70 shadow-[0_1px_2px_rgba(0,0,0,0.55)] ${size}`;
+
+        if (attachment.kind === 'tool') {
+          return (
+            <span
+              key={`${attachment.name}-${index}`}
+              role="listitem"
+              title={attachment.name}
+              className={`${shared} rounded-[3px] bg-zinc-700 text-white`}
+            >
+              <Wrench className={large ? "h-3 w-3 lg:h-3.5 lg:w-3.5" : "h-2.5 w-2.5 lg:h-3 lg:w-3"} aria-hidden />
+            </span>
+          );
+        }
+
+        const style = attachment.energyType
+          ? ENERGY_STYLE[attachment.energyType]
+          : SPECIAL_ENERGY_STYLE;
+        const abbr = attachment.energyType
+          ? ENERGY_ABBREVIATION[attachment.energyType]
+          : SPECIAL_ENERGY_ABBREVIATION;
+
+        return (
+          <span
+            key={`${attachment.name}-${index}`}
+            role="listitem"
+            title={attachment.name}
+            className={`${shared} rounded-full ${style}`}
+          >
+            {abbr}
+          </span>
+        );
+      })}
+
+      {overflow > 0 && (
+        <span
+          role="listitem"
+          title={classified.slice(MAX_VISIBLE_CHIPS).map((a) => a.name).join(', ')}
+          className={`flex items-center rounded-full bg-white/95 px-1.5 font-bold leading-none text-neutral-900 ring-1 ring-black/20 ${
+            large ? 'h-5 text-[10px] lg:h-6 lg:text-xs' : 'h-4 text-[9px] lg:h-5 lg:text-[10px]'
+          }`}
+        >
+          +{overflow}
         </span>
       )}
     </div>

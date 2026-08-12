@@ -69,3 +69,54 @@ describe('BoardStateView', () => {
     expect(container).toBeTruthy();
   });
 });
+
+describe('BoardStateView attachment chips', () => {
+  const withAttachments = (attachments: string[]) => ({
+    ash: {
+      active: { name: 'Drakloak', evolvedFrom: [], damage: 0, attachments },
+      bench: [],
+    },
+  });
+  const cards = { Drakloak: { name: 'Drakloak', imageUrl: 'https://cdn.example/d.png', hp: 120 } };
+
+  it('renders no chip group when nothing is attached', () => {
+    render(<BoardStateView board={withAttachments([]) as any} cards={cards} />);
+    expect(screen.queryByTestId('attachment-chips')).toBeNull();
+  });
+
+  it('shows the TCG shorthand letter for a basic energy', () => {
+    render(<BoardStateView board={withAttachments(['Basic Psychic Energy']) as any} cards={cards} />);
+    expect(screen.getByTitle('Basic Psychic Energy').textContent).toBe('P');
+  });
+
+  it('uses R for fire, matching decklist shorthand rather than F', () => {
+    render(<BoardStateView board={withAttachments(['Basic Fire Energy']) as any} cards={cards} />);
+    expect(screen.getByTitle('Basic Fire Energy').textContent).toBe('R');
+  });
+
+  it('marks a special energy with S rather than a type letter', () => {
+    render(<BoardStateView board={withAttachments(["Team Rocket's Energy"]) as any} cards={cards} />);
+    expect(screen.getByTitle("Team Rocket's Energy").textContent).toBe('S');
+  });
+
+  it('renders a tool without a letter, so shape carries the distinction', () => {
+    render(<BoardStateView board={withAttachments(['Brave Bangle']) as any} cards={cards} />);
+    expect(screen.getByTitle('Brave Bangle').textContent).toBe('');
+  });
+
+  it('names every attachment in the group label for screen readers', () => {
+    render(
+      <BoardStateView board={withAttachments(['Basic Fire Energy', 'Brave Bangle']) as any} cards={cards} />
+    );
+    expect(screen.getByTestId('attachment-chips').getAttribute('aria-label')).toContain(
+      'Basic Fire Energy, Brave Bangle'
+    );
+  });
+
+  it('collapses past four attachments into an overflow chip', () => {
+    const many = ['Basic Fire Energy', 'Basic Grass Energy', 'Basic Water Energy', 'Brave Bangle', 'Sparkling Crystal'];
+    render(<BoardStateView board={withAttachments(many) as any} cards={cards} />);
+    expect(screen.getByText('+1')).toBeTruthy();
+    expect(screen.getByTitle('Sparkling Crystal')).toBeTruthy();
+  });
+});
