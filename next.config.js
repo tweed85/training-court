@@ -8,6 +8,13 @@ const nextConfig = {
         port: '',
         pathname: '/**',
       },
+      {
+        // Card art served by the deckbuilder catalog.
+        protocol: 'https',
+        hostname: 'pkmn-tcg-api-images.sfo2.cdn.digitaloceanspaces.com',
+        port: '',
+        pathname: '/**',
+      },
     ],
   },
 };

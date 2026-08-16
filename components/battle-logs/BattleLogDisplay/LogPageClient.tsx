@@ -11,6 +11,8 @@ import { Database } from '@/database.types';
 import { Sprite } from '@/components/archetype/sprites/Sprite';
 import { BattleLogCarousel } from './BattleLogCarousel';
 import { Notes } from '@/components/battle-logs/Notes/Notes';
+import { MatchAnalysis } from '@/components/battle-logs/Analysis/MatchAnalysis';
+import { isPremiumUser } from '@/components/premium/premium.utils';
 import { parseBattleLog } from '@/components/battle-logs/utils/battle-log.utils';
 
 type LogRow = Database['public']['Tables']['logs']['Row'];
@@ -64,11 +66,20 @@ export function LogPageClient({ logId, requireAuth = false }: LogPageClientProps
     logData.archetype,
     logData.opp_archetype,
     userData?.live_screen_name ?? null,
-    logData.format
+    logData.format,
+    logData.decklist_id
   );
 
+  // The row owner, not the screen name. Screen names are self-assigned, so
+  // matching on one let anybody who set theirs to another player's PTCGL handle
+  // render the Notes and Analysis panels on that person's public log.
+  const isOwnLog = Boolean(user && logData.user === user.id);
+
   return (
-    <div className="flex-1 flex flex-col w-full h-full sm:max-w-lg justify-between gap-2 p-4">
+    // `sm:max-w-lg` capped the page at 512px and never grew, so a 1512px desktop
+    // spent two thirds of its width on nothing. The ladder widens with the
+    // viewport; prose inside caps its own measure so lines stay readable.
+    <div className="flex-1 flex flex-col w-full h-full max-w-lg md:max-w-2xl lg:max-w-4xl xl:max-w-6xl mx-auto justify-between gap-2 p-4 lg:px-8 lg:py-6">
       <div className="flex flex-col gap-8">
         <div className="flex flex-col items-center gap-4">
           <div className="flex items-center justify-evenly w-full">
@@ -85,9 +96,8 @@ export function LogPageClient({ logId, requireAuth = false }: LogPageClientProps
             {formatDistanceToNowStrict(battleLog.date)} ago
           </h3>
         </div>
-        {user && userData?.live_screen_name && (userData.live_screen_name === battleLog.players[0].name) && (
-          <Notes logId={logData.id} serverLoadedNotes={logData.notes} />
-        )}
+        {isOwnLog && <Notes logId={logData.id} serverLoadedNotes={logData.notes} />}
+        {isOwnLog && isPremiumUser(user?.id) && <MatchAnalysis logId={logData.id} />}
         <div className="mt-6">
           <BattleLogCarousel battleLog={battleLog} />
         </div>

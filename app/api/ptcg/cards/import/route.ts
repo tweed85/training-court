@@ -1,4 +1,9 @@
 ﻿import { getAllDeckbuilderCards, type DeckbuilderCatalogCard } from '@/lib/server/ptcg-card-catalog';
+import {
+  decodeHtmlEntities,
+  normalizeCardName as normalize,
+  normalizeCardNumber,
+} from '@/lib/server/ptcg-card-name';
 
 type ImportCardLine = {
   qty: number;
@@ -29,32 +34,6 @@ const basicEnergyNames = new Set([
   'metal',
   'fairy',
 ]);
-
-const normalize = (value: string): string =>
-  value
-    .trim()
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[’']/g, "'")
-    .replace(/\s+prism star\b/g, ' {*} ')
-    .replace(/\bprism star\b/g, '{*}')
-    .replace(/\s*-\s*(gx|ex|v|vmax|vstar)\b/g, ' $1')
-    .replace(/\s+/g, ' ');
-
-const normalizeCardNumber = (value: string): string => {
-  const trimmed = value.trim().toLowerCase();
-  const match = trimmed.match(/^0*(\d+)([a-z]*)$/);
-  return match ? `${match[1]}${match[2]}` : trimmed;
-};
-
-const decodeHtmlEntities = (value: string): string =>
-  value
-    .replace(/&amp;/gi, '&')
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;|&apos;/gi, "'")
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>');
 
 const buildIndex = (cards: DeckbuilderCatalogCard[]) => {
   const bySetNumber = new Map<string, DeckbuilderCatalogCard>();
