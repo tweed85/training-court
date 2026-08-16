@@ -18,10 +18,14 @@ const board = {
   ash: {
     active: { name: 'Drakloak', evolvedFrom: ['Dreepy'], damage: 60, attachments: ['Basic Psychic Energy'] },
     bench: [{ name: 'Hoothoot', evolvedFrom: [], damage: 0, attachments: [] }],
+    hand: [{ name: 'Rare Candy' }, { name: '', unknown: true }],
+    discardPile: [{ name: 'Nest Ball' }],
   },
   misty: {
     active: { name: "Team Rocket's Tarountula", evolvedFrom: [], damage: 0, attachments: [] },
     bench: [{ name: '', evolvedFrom: [], damage: 0, attachments: [], unknown: true }],
+    hand: [{ name: '', unknown: true }, { name: '', unknown: true }],
+    discardPile: [],
   },
 };
 
@@ -67,6 +71,41 @@ describe('BoardStateView', () => {
   it('renders an empty board without crashing', () => {
     const { container } = render(<BoardStateView board={{ ash: { active: null, bench: [] } } as any} cards={{}} />);
     expect(container).toBeTruthy();
+  });
+});
+
+describe('BoardStateView hand and discard zones', () => {
+  it('renders a known hand card by name when no art is available', () => {
+    render(<BoardStateView board={board as any} cards={cards} />);
+    expect(screen.getByText('Rare Candy')).toBeTruthy();
+  });
+
+  it('renders known hand cards by art when available', () => {
+    const handBoard = {
+      ash: { active: null, bench: [], hand: [{ name: 'Hoothoot' }], discardPile: [] },
+    };
+    render(<BoardStateView board={handBoard as any} cards={cards} />);
+    expect(screen.getByAltText('Hoothoot').getAttribute('src')).toBe('https://cdn.example/hoothoot.png');
+  });
+
+  it('renders unknown hand cards as placeholders that say Unknown', () => {
+    render(<BoardStateView board={board as any} cards={cards} />);
+    const placeholders = screen.getAllByTestId('zone-unknown-card');
+    expect(placeholders).toHaveLength(3);
+    for (const placeholder of placeholders) expect(placeholder.textContent).toBe('Unknown');
+  });
+
+  it('shows the discard pile contents', () => {
+    render(<BoardStateView board={board as any} cards={cards} />);
+    expect(screen.getByTestId('board-discard')).toBeTruthy();
+    expect(screen.getByText('Nest Ball')).toBeTruthy();
+  });
+
+  it('hides the zones for a board without hand or discard data', () => {
+    const bare = { ash: { active: null, bench: [] } };
+    render(<BoardStateView board={bare as any} cards={{}} />);
+    expect(screen.queryByTestId('board-hand')).toBeNull();
+    expect(screen.queryByTestId('board-discard')).toBeNull();
   });
 });
 

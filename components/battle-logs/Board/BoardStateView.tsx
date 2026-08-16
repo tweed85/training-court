@@ -10,7 +10,7 @@ import {
   SPECIAL_ENERGY_STYLE,
   classifyAttachment,
 } from './attachment';
-import type { BoardState, PokemonInPlay } from '../utils/board-state.types';
+import type { BoardState, PokemonInPlay, ZoneCard } from '../utils/board-state.types';
 import type { LookupCard } from '@/app/api/ptcg/cards/lookup/route';
 
 interface BoardStateViewProps {
@@ -36,6 +36,8 @@ const CARD_SHAPE = 'aspect-[63/88] rounded-md';
 const SLOT_WIDTH = {
   active: 'w-24 lg:w-32 xl:w-36',
   bench: 'w-16 lg:w-20 xl:w-24',
+  /** Hand and discard cards are for counting and recall, not reading text. */
+  zone: 'w-10 lg:w-12 xl:w-14',
 } as const;
 
 function CardSlot({
@@ -99,6 +101,73 @@ function CardSlot({
       )}
 
 
+    </div>
+  );
+}
+
+/** One card in the hand or discard pile. */
+function ZoneSlot({ item, card }: { item: ZoneCard; card?: LookupCard }) {
+  const gt = useGT();
+
+  if (item.unknown) {
+    return (
+      <div
+        data-testid="zone-unknown-card"
+        className={`${SLOT_WIDTH.zone} ${CARD_SHAPE} flex items-center justify-center border border-dashed border-muted-foreground/40 bg-muted/40 p-0.5 text-center text-[8px] leading-tight text-muted-foreground lg:text-[9px]`}
+      >
+        {gt('Unknown', { $id: 'battleLogs.board.unknownZoneCard' })}
+      </div>
+    );
+  }
+
+  if (card?.imageUrl) {
+    return (
+      <Image
+        src={card.imageUrl}
+        alt={item.name}
+        title={item.name}
+        width={INTRINSIC_WIDTH}
+        height={INTRINSIC_HEIGHT}
+        sizes="56px"
+        className={`${SLOT_WIDTH.zone} h-auto ${CARD_SHAPE} object-cover`}
+      />
+    );
+  }
+
+  return (
+    <div
+      title={item.name}
+      className={`${SLOT_WIDTH.zone} ${CARD_SHAPE} flex items-center justify-center border bg-muted p-0.5 text-center text-[8px] leading-tight lg:text-[9px]`}
+    >
+      {item.name}
+    </div>
+  );
+}
+
+/** A labeled, compact card zone: Hand or Discard. Hidden while empty. */
+function CardZone({
+  label,
+  items,
+  cards,
+  testId,
+}: {
+  label: string;
+  items: ZoneCard[];
+  cards: Record<string, LookupCard>;
+  testId: string;
+}) {
+  if (items.length === 0) return null;
+
+  return (
+    <div className="flex flex-col gap-1" data-testid={testId}>
+      <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+        {label} ({items.length})
+      </span>
+      <div className="flex flex-wrap gap-1">
+        {items.map((item, index) => (
+          <ZoneSlot key={`${item.name}-${index}`} item={item} card={cards[item.name]} />
+        ))}
+      </div>
     </div>
   );
 }
@@ -185,16 +254,20 @@ function AttachmentChips({ attachments, large }: { attachments: string[]; large?
   );
 }
 
-/** One player's active Pokemon plus their bench. */
+/** One player's active Pokemon and bench, plus their hand and discard pile. */
 function PlayerRow({
   name,
   active,
   bench,
+  hand,
+  discardPile,
   cards,
 }: {
   name: string;
   active: PokemonInPlay | null;
   bench: PokemonInPlay[];
+  hand: ZoneCard[];
+  discardPile: ZoneCard[];
   cards: Record<string, LookupCard>;
 }) {
   const gt = useGT();
@@ -220,6 +293,22 @@ function PlayerRow({
           </div>
         )}
       </div>
+      {(hand.length > 0 || discardPile.length > 0) && (
+        <div className="flex flex-wrap items-start gap-4 lg:gap-6">
+          <CardZone
+            label={gt('Hand', { $id: 'battleLogs.board.hand' })}
+            items={hand}
+            cards={cards}
+            testId="board-hand"
+          />
+          <CardZone
+            label={gt('Discard', { $id: 'battleLogs.board.discard' })}
+            items={discardPile}
+            cards={cards}
+            testId="board-discard"
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -238,6 +327,8 @@ export function BoardStateView({ board, cards }: BoardStateViewProps) {
           name={playerName}
           active={playerBoard.active}
           bench={playerBoard.bench}
+          hand={playerBoard.hand ?? []}
+          discardPile={playerBoard.discardPile ?? []}
           cards={cards}
         />
       ))}

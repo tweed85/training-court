@@ -42,6 +42,9 @@ export function BattleLogCarousel(props: BattleLogCarouselProps) {
           for (const benched of player.bench) {
             if (!benched.unknown) names.add(benched.name);
           }
+          for (const held of [...player.hand, ...player.discardPile]) {
+            if (!held.unknown) names.add(held.name);
+          }
         }
       }
       return Array.from(names);
@@ -61,7 +64,7 @@ export function BattleLogCarousel(props: BattleLogCarouselProps) {
   return (
     <div className="flex flex-col gap-4">
         {props.battleLog.sections.map((section, index) => (
-          <Card className={` ${getCardBackgroundColor(index, section)}`}>
+          <Card key={`${section.turnTitle}-${index}`} className={` ${getCardBackgroundColor(index, section)}`}>
             <CardHeader>
               <CardTitle className="dark:text-white">{section.turnTitle}</CardTitle>
               {index > 0 && (
@@ -71,7 +74,7 @@ export function BattleLogCarousel(props: BattleLogCarouselProps) {
                     const prizesThisPlayerHasTaken = (index === 0) ? 0 : previousPrizesOfThisPlayer - section.prizesAfterTurn[playerName];
 
                     return (
-                      <span className={cn(
+                      <span key={playerName} className={cn(
                         (prizesThisPlayerHasTaken > 0) && 'font-bold'
                       )}>{playerName}: {((section.player === playerName || prizesThisPlayerHasTaken > 0) && `${previousPrizesOfThisPlayer} → `)}{prizesRemaining} prize{prizesRemaining !== 1 && 's'}<br /></span>
                     )
@@ -81,14 +84,14 @@ export function BattleLogCarousel(props: BattleLogCarouselProps) {
             </CardHeader>
             <CardContent>
               {boards[index] && <BoardStateView board={boards[index]} cards={cards} />}
-              {section.actions.map((action) => action.details.length === 0 ? (
-                <p className="py-1">{action.title}</p>
+              {section.actions.map((action, actionIndex) => action.details.length === 0 ? (
+                <p key={`${action.title}-${actionIndex}`} className="py-1">{action.title}</p>
               ) : (
-                <Accordion type="single" collapsible>
+                <Accordion key={`${action.title}-${actionIndex}`} type="single" collapsible>
                   <AccordionItem value="item-1">
                     <AccordionTrigger className="px-0 py-1 text-left">{action.title}</AccordionTrigger>
                     <AccordionContent>
-                      {action.details.map((detail) => <p>{detail}<br /></p>)}
+                      {action.details.map((detail, detailIndex) => <p key={`${detail}-${detailIndex}`}>{detail}<br /></p>)}
                     </AccordionContent>
                   </AccordionItem>
                 </Accordion>

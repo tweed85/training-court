@@ -1,5 +1,5 @@
 import type { BattleLog } from './battle-log.types';
-import type { BoardState, PlayerBoard, PokemonInPlay } from './board-state.types';
+import type { BoardState, PlayerBoard, PokemonInPlay, ZoneCard } from './board-state.types';
 
 const MAX_BENCH = 5;
 
@@ -19,11 +19,13 @@ const newPokemon = (name: string, unknown = false): PokemonInPlay => ({
   ...(unknown ? { unknown: true } : {}),
 });
 
-const emptyBoard = (): PlayerBoard => ({ active: null, bench: [] });
+const emptyBoard = (): PlayerBoard => ({ active: null, bench: [], hand: [], discardPile: [] });
 
 const cloneBoard = (board: PlayerBoard): PlayerBoard => ({
   active: board.active ? { ...board.active, evolvedFrom: [...board.active.evolvedFrom], attachments: [...board.active.attachments] } : null,
   bench: board.bench.map((p) => ({ ...p, evolvedFrom: [...p.evolvedFrom], attachments: [...p.attachments] })),
+  hand: board.hand.map((c) => ({ ...c })),
+  discardPile: board.discardPile.map((c) => ({ ...c })),
 });
 
 const cloneState = (state: BoardState): BoardState => {
@@ -45,6 +47,10 @@ const cloneState = (state: BoardState): BoardState => {
  * a named card always outranks an unnamed placeholder, so a "drew 2 cards and
  * played them to the Bench" we could not resolve never keeps a real Pokemon off
  * the board.
+ *
+ * Hands and discard piles are best-effort. Named draws and discards are tracked
+ * by name; counted draws become unknown placeholders. Hand-to-deck shuffles
+ * (Iono, Judge) are not modeled, so a hand count can drift high after them.
  */
 export function deriveBoardStates(battleLog: BattleLog): BoardState[] {
   if (battleLog.language !== 'en') return [];
@@ -75,6 +81,20 @@ export function deriveBoardStates(battleLog: BattleLog): BoardState[] {
     attach: new RegExp(`^(${who}) attached (.+) to (.+) (?:in the Active Spot|on the Bench)\\.$`),
     damage: new RegExp(`^(${who})${APOS}s (.+) used (.+) on (${who})${APOS}s (.+) for (\\d+) damage\\.$`),
     status: new RegExp(`^(${who})${APOS}s (.+) is now (Asleep|Paralyzed|Confused|Poisoned|Burned)\\.$`),
+    // Hand and discard tracking. The counted draw forms (and benchDrawn /
+    // benchUnknown above) must all be tried before the catch-all drewNamed.
+    openingHand: new RegExp(`^(${who}) drew (\\d+) cards? for the opening hand\\.$`),
+    drewOne: new RegExp(`^(${who}) drew a card\\.$`),
+    drewCount: new RegExp(`^(${who}) drew (\\d+) cards?\\.$`),
+    /** The log owner's own draws are named; the opponent's are only counted. */
+    drewNamed: new RegExp(`^(${who}) drew (.+)\\.$`),
+    /** Prize cards and search effects: "Arven was added to X's hand." */
+    addedToHand: new RegExp(`^(.+) was added to (${who})${APOS}s hand\\.$`),
+    playedStadium: new RegExp(`^(${who}) played (.+) to the Stadium spot\\.$`),
+    /** Catch-all for cards played from hand; tried after every specific "played" form. */
+    played: new RegExp(`^(${who}) played (.+)\\.$`),
+    discarded: new RegExp(`^(${who}) discarded (.+)\\.$`),
+    discardedFrom: new RegExp(`^(.+) was discarded from (${who})${APOS}s (.+)\\.$`),
   };
 
   const state: BoardState = {};
@@ -157,15 +177,38 @@ export function deriveBoardStates(battleLog: BattleLog): BoardState[] {
   };
 
   /** Strict removal: bouncing a card must not invent board presence to delete. */
-  const removeFromPlay = (board: PlayerBoard, name: string): void => {
+  const removeFromPlay = (board: PlayerBoard, name: string): PokemonInPlay | undefined => {
     if (board.active?.name === name) {
+      const removed = board.active;
       board.active = null;
-      return;
+      return removed;
     }
 
     const index = findOnBench(board, name);
-    if (index !== -1) board.bench.splice(index, 1);
+    if (index === -1) return undefined;
+    return board.bench.splice(index, 1)[0];
   };
+
+  /** Find a Pokemon by name only — no placeholder adoption, no invention. */
+  const findInPlayStrict = (board: PlayerBoard, name: string): PokemonInPlay | undefined =>
+    board.active?.name === name ? board.active : board.bench.find((p) => p.name === name);
+
+  /**
+   * Remove one card from the hand: the named card if we saw it enter, else an
+   * unnamed placeholder. Playing a card we never saw drawn still shrinks the
+   * hand — the card was there, we just could not name it.
+   */
+  const takeFromHand = (board: PlayerBoard, name: string): void => {
+    let index = board.hand.findIndex((c) => c.name === name);
+    if (index === -1) index = board.hand.findIndex((c) => c.unknown);
+    if (index !== -1) board.hand.splice(index, 1);
+  };
+
+  const drawUnknown = (board: PlayerBoard, count: number): void => {
+    for (let i = 0; i < count; i += 1) board.hand.push({ name: '', unknown: true });
+  };
+
+  const asZoneCards = (names: string[]): ZoneCard[] => names.map((name) => ({ name }));
 
   /**
    * "drew 2 cards and played them to the Bench" names nothing, but PTCGL prints
@@ -209,6 +252,7 @@ export function deriveBoardStates(battleLog: BattleLog): BoardState[] {
     let m = line.match(RE.active);
     if (m) {
       const board = state[m[1]];
+      takeFromHand(board, m[2]);
       // A Pokemon already active is displaced only by an explicit retreat or KO.
       if (board.active === null) board.active = newPokemon(m[2]);
       else benchNew(board, newPokemon(m[2]));
@@ -217,6 +261,7 @@ export function deriveBoardStates(battleLog: BattleLog): BoardState[] {
 
     m = line.match(RE.bench);
     if (m) {
+      takeFromHand(state[m[1]], m[2]);
       benchNew(state[m[1]], newPokemon(m[2]));
       return;
     }
@@ -230,6 +275,36 @@ export function deriveBoardStates(battleLog: BattleLog): BoardState[] {
     m = line.match(RE.benchUnknown);
     if (m) {
       pendingBenchReveal = { player: m[1], count: Number(m[2]) };
+      return;
+    }
+
+    m = line.match(RE.openingHand);
+    if (m) {
+      drawUnknown(state[m[1]], Number(m[2]));
+      return;
+    }
+
+    m = line.match(RE.drewOne);
+    if (m) {
+      drawUnknown(state[m[1]], 1);
+      return;
+    }
+
+    m = line.match(RE.drewCount);
+    if (m) {
+      drawUnknown(state[m[1]], Number(m[2]));
+      return;
+    }
+
+    m = line.match(RE.drewNamed);
+    if (m) {
+      state[m[1]].hand.push({ name: m[2] });
+      return;
+    }
+
+    m = line.match(RE.addedToHand);
+    if (m) {
+      state[m[2]].hand.push({ name: m[1] });
       return;
     }
 
@@ -248,7 +323,20 @@ export function deriveBoardStates(battleLog: BattleLog): BoardState[] {
 
     m = line.match(RE.toHand);
     if (m) {
-      if (m[1] === m[2] && !CARD_COUNT_PHRASE.test(m[3])) removeFromPlay(state[m[1]], m[3]);
+      const player = m[1];
+      const owner = m[2];
+      const cardName = m[3];
+      if (player !== owner || CARD_COUNT_PHRASE.test(cardName)) return;
+      const board = state[player];
+      const removed = removeFromPlay(board, cardName);
+      if (removed) {
+        // Professor Turo's Scenario: the Pokemon and everything on it go to hand.
+        board.hand.push({ name: removed.name }, ...asZoneCards(removed.attachments));
+      } else {
+        // Night Stretcher and friends recover a card from the discard pile.
+        const index = board.discardPile.findIndex((c) => c.name === cardName);
+        if (index !== -1) board.hand.push(...board.discardPile.splice(index, 1));
+      }
       return;
     }
 
@@ -266,6 +354,8 @@ export function deriveBoardStates(battleLog: BattleLog): BoardState[] {
 
     m = line.match(RE.evolve);
     if (m) {
+      // The evolution card leaves the hand whether or not we tracked the base.
+      takeFromHand(state[m[1]], m[3]);
       const target = findInPlay(state[m[1]], m[2]);
       if (target) {
         // Damage stays with the Pokemon through evolution, as in the real game.
@@ -277,6 +367,7 @@ export function deriveBoardStates(battleLog: BattleLog): BoardState[] {
 
     m = line.match(RE.attach);
     if (m) {
+      takeFromHand(state[m[1]], m[2]);
       const target = findInPlay(state[m[1]], m[3]);
       if (target) target.attachments.push(m[2]);
       return;
@@ -299,12 +390,54 @@ export function deriveBoardStates(battleLog: BattleLog): BoardState[] {
     m = line.match(RE.knockout);
     if (m) {
       const board = state[m[1]];
+      let fallen: PokemonInPlay | undefined;
       if (board.active && board.active.name === m[2]) {
+        fallen = board.active;
         board.active = null;
-        return;
+      } else {
+        const index = findOnBench(board, m[2]);
+        if (index !== -1) fallen = board.bench.splice(index, 1)[0];
       }
-      const index = findOnBench(board, m[2]);
-      if (index !== -1) board.bench.splice(index, 1);
+      if (fallen) {
+        board.discardPile.push({ name: fallen.name }, ...asZoneCards(fallen.attachments));
+      }
+      return;
+    }
+
+    // "played X to the Stadium spot." must be tried before the catch-all, or
+    // the suffix would be read as part of the card name and miss the hand.
+    m = line.match(RE.playedStadium) ?? line.match(RE.played);
+    if (m) {
+      takeFromHand(state[m[1]], m[2]);
+      return;
+    }
+
+    m = line.match(RE.discarded);
+    if (m) {
+      const player = m[1];
+      const cardName = m[2];
+      const board = state[player];
+      // Only a named match leaves the hand: "discarded Grand Tree" may be a
+      // stadium leaving play, so an unnamed hand card is not consumed on faith.
+      const index = board.hand.findIndex((c) => c.name === cardName);
+      if (index !== -1) board.hand.splice(index, 1);
+      board.discardPile.push({ name: cardName });
+      return;
+    }
+
+    m = line.match(RE.discardedFrom);
+    if (m) {
+      const cardName = m[1];
+      const player = m[2];
+      const pokemonName = m[3];
+      // Strict lookup: after a KO the Pokemon is gone and the KO handler has
+      // already moved its attachments to the discard pile — adding the card
+      // again on the itemized line that follows would double-count it.
+      const target = findInPlayStrict(state[player], pokemonName);
+      if (!target) return;
+      const index = target.attachments.indexOf(cardName);
+      if (index !== -1) target.attachments.splice(index, 1);
+      state[player].discardPile.push({ name: cardName });
     }
   };
 

@@ -358,6 +358,173 @@ describe('deriveBoardStates — evolution, attachments, damage', () => {
   });
 });
 
+describe('deriveBoardStates — hand tracking', () => {
+  it('fills the opening hand with unknown cards', () => {
+    const boards = deriveBoardStates(log([turn(['ash drew 7 cards for the opening hand.'])]));
+    expect(boards[0].ash.hand).toHaveLength(7);
+    expect(boards[0].ash.hand.every((c) => c.unknown)).toBe(true);
+  });
+
+  it('adds an unknown card for "drew a card" and a batch for "drew N cards"', () => {
+    const boards = deriveBoardStates(log([turn(['misty drew a card.', 'misty drew 3 cards.'])]));
+    expect(boards[0].misty.hand).toHaveLength(4);
+    expect(boards[0].misty.hand.every((c) => c.unknown)).toBe(true);
+  });
+
+  it('adds a named draw to the hand by name', () => {
+    const boards = deriveBoardStates(log([turn(["ash drew Boss's Orders."])]));
+    expect(boards[0].ash.hand).toEqual([{ name: "Boss's Orders" }]);
+  });
+
+  it("adds a card 'added to X's hand' (prizes, search effects)", () => {
+    const boards = deriveBoardStates(log([turn(["Arven was added to ash's hand."])]));
+    expect(boards[0].ash.hand).toEqual([{ name: 'Arven' }]);
+  });
+
+  it('does not grow the hand for a Pokemon drawn straight to the Bench', () => {
+    const boards = deriveBoardStates(log([turn(['ash drew Genesect ex and played it to the Bench.'])]));
+    expect(boards[0].ash.hand).toHaveLength(0);
+  });
+
+  it('removes the named card from the hand when it is played', () => {
+    const boards = deriveBoardStates(log([turn(['ash drew Nest Ball.', 'ash played Nest Ball.'])]));
+    expect(boards[0].ash.hand).toHaveLength(0);
+  });
+
+  it('consumes an unknown card when an unseen card is played', () => {
+    const boards = deriveBoardStates(
+      log([turn(['ash drew 7 cards for the opening hand.', 'ash played Ultra Ball.'])])
+    );
+    expect(boards[0].ash.hand).toHaveLength(6);
+  });
+
+  it('takes a Pokemon out of the hand when placed in play', () => {
+    const boards = deriveBoardStates(
+      log([turn(['ash drew Hoothoot.', 'ash drew a card.', 'ash played Hoothoot to the Bench.'])])
+    );
+    expect(boards[0].ash.hand).toHaveLength(1);
+    expect(boards[0].ash.hand[0].unknown).toBe(true);
+  });
+
+  it('removes a played stadium by name rather than a suffixed mismatch', () => {
+    const boards = deriveBoardStates(
+      log([turn(['ash drew Artazon.', 'ash played Artazon to the Stadium spot.'])])
+    );
+    expect(boards[0].ash.hand).toHaveLength(0);
+  });
+
+  it('removes an attached energy from the hand', () => {
+    const boards = deriveBoardStates(
+      log([
+        turn([
+          'ash played Pikipek to the Active Spot.',
+          'ash drew Basic Psychic Energy.',
+          'ash attached Basic Psychic Energy to Pikipek in the Active Spot.',
+        ]),
+      ])
+    );
+    expect(boards[0].ash.hand).toHaveLength(0);
+  });
+
+  it('removes the evolution card from the hand on evolve', () => {
+    const boards = deriveBoardStates(
+      log([
+        turn([
+          'ash played Dreepy to the Bench.',
+          'ash drew Drakloak.',
+          'ash evolved Dreepy to Drakloak on the Bench.',
+        ]),
+      ])
+    );
+    expect(boards[0].ash.hand).toHaveLength(0);
+  });
+
+  it('returns a bounced Pokemon and its attachments to the hand', () => {
+    const boards = deriveBoardStates(
+      log([
+        turn([
+          'ash played Genesect ex to the Active Spot.',
+          'ash attached Basic Metal Energy to Genesect ex in the Active Spot.',
+          "ash moved ash's Genesect ex to their hand.",
+        ]),
+      ])
+    );
+    expect(boards[0].ash.hand.map((c) => c.name)).toEqual(['Genesect ex', 'Basic Metal Energy']);
+  });
+});
+
+describe('deriveBoardStates — discard tracking', () => {
+  it('moves a discarded card from the hand to the discard pile', () => {
+    const boards = deriveBoardStates(log([turn(['ash drew Arven.', 'ash discarded Arven.'])]));
+    expect(boards[0].ash.hand).toHaveLength(0);
+    expect(boards[0].ash.discardPile).toEqual([{ name: 'Arven' }]);
+  });
+
+  it('does not consume an unknown hand card for a discard it never saw drawn', () => {
+    // "discarded Grand Tree" may be a stadium leaving play, not a hand discard.
+    const boards = deriveBoardStates(
+      log([turn(['ash drew 7 cards for the opening hand.', 'ash discarded Grand Tree.'])])
+    );
+    expect(boards[0].ash.hand).toHaveLength(7);
+    expect(boards[0].ash.discardPile).toEqual([{ name: 'Grand Tree' }]);
+  });
+
+  it('moves a card discarded from a Pokemon into the discard pile', () => {
+    const boards = deriveBoardStates(
+      log([
+        turn([
+          'ash played Solrock to the Active Spot.',
+          'ash attached Basic Fighting Energy to Solrock in the Active Spot.',
+          "Basic Fighting Energy was discarded from ash's Solrock.",
+        ]),
+      ])
+    );
+    expect(boards[0].ash.active?.attachments).toEqual([]);
+    expect(boards[0].ash.discardPile).toEqual([{ name: 'Basic Fighting Energy' }]);
+  });
+
+  it('sends a Knocked Out Pokemon and its attachments to the discard pile', () => {
+    const boards = deriveBoardStates(
+      log([
+        turn([
+          'misty played Froakie to the Active Spot.',
+          'misty attached Basic Water Energy to Froakie in the Active Spot.',
+          "misty's Froakie was Knocked Out!",
+        ]),
+      ])
+    );
+    expect(boards[0].misty.discardPile.map((c) => c.name)).toEqual(['Froakie', 'Basic Water Energy']);
+  });
+
+  it('does not double-count an attachment itemized after a Knock Out', () => {
+    const boards = deriveBoardStates(
+      log([
+        turn([
+          'misty played Froakie to the Active Spot.',
+          'misty attached Basic Water Energy to Froakie in the Active Spot.',
+          "misty's Froakie was Knocked Out!",
+          "Basic Water Energy was discarded from misty's Froakie.",
+        ]),
+      ])
+    );
+    expect(boards[0].misty.discardPile.map((c) => c.name)).toEqual(['Froakie', 'Basic Water Energy']);
+  });
+
+  it('recovers a card from the discard pile to the hand (Night Stretcher)', () => {
+    const boards = deriveBoardStates(
+      log([
+        turn([
+          'misty played Froakie to the Active Spot.',
+          "misty's Froakie was Knocked Out!",
+          "misty moved misty's Froakie to their hand.",
+        ]),
+      ])
+    );
+    expect(boards[0].misty.discardPile).toHaveLength(0);
+    expect(boards[0].misty.hand.map((c) => c.name)).toEqual(['Froakie']);
+  });
+});
+
 describe('deriveBoardStates — real fixtures', () => {
   it('produces one board per section and never exceeds five benched', () => {
     const parsed = parseBattleLog(battleLogNewStructure, 'l', '2026-01-01', null, null, 'Bassoonboy135', 'SVI-DRI');
@@ -426,6 +593,20 @@ describe('deriveBoardStates — real fixtures', () => {
       'Duskull',
       'Fezandipiti ex',
     ]);
+  });
+
+  it('tracks hands and discard piles through a real log', () => {
+    const parsed = parseBattleLog(battleLogNewStructure, 'l', '2026-01-01', null, null, 'Bassoonboy135', 'SVI-DRI');
+    const boards = deriveBoardStates(parsed);
+
+    // Setup: seven unknown opening-hand cards minus the Pokemon placed in play.
+    expect(boards[0].Player2.hand).toHaveLength(6);
+    expect(boards[0].Player2.hand.every((c) => c.unknown)).toBe(true);
+
+    const final = boards[boards.length - 1];
+    expect(final.Bassoonboy135.discardPile.map((c) => c.name)).toContain('Arven');
+    expect(final.Player2.discardPile.map((c) => c.name)).toContain('Froakie');
+    expect(final.Player2.discardPile.map((c) => c.name)).toContain('Grand Tree');
   });
 
   it('puts a Pokemon in play for both players by the end of setup', () => {
