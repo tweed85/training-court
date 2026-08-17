@@ -146,6 +146,43 @@ describe('hand grammar — removals', () => {
   });
 });
 
+describe('stadium plays', () => {
+  // PTCGL prints the placement and then a plain play for the same card. Only
+  // one of the two lines may spend a card out of the hand.
+  it('leaves the arithmetic to the follow-up play line', () => {
+    const h = hand([
+      'ash drew 4 cards.',
+      'ash drew Artazon.',
+      'ash played Artazon to the Stadium spot.',
+      'ash played Artazon.',
+    ]);
+    expect(h.known).toEqual([]);
+    expect(h.size).toBe(4);
+  });
+
+  // Without the follow-up we over-count by one. That is an extra face-down
+  // card, which is the direction the whole zone split exists to fail in.
+  it('drops the identity but not the count when no follow-up comes', () => {
+    const h = hand(['ash drew 4 cards.', 'ash drew Artazon.', 'ash played Artazon to the Stadium spot.']);
+    expect(h.known).toEqual([]);
+    expect(h.size).toBe(5);
+  });
+
+  // Falling through to the plain play pattern captured "Artazon to the Stadium
+  // spot" as the name, which removeKnown could never find: the count dropped
+  // while the real Artazon kept rendering face-up in the hand.
+  it('never strands the stadium card face-up in the hand', () => {
+    const h = hand([
+      'ash drew 4 cards.',
+      'ash drew Artazon.',
+      'ash drew Iono.',
+      'ash played Artazon to the Stadium spot.',
+    ]);
+    expect(h.known).toEqual(['Iono']);
+    expect(h.size).toBe(6);
+  });
+});
+
 describe('knockouts stay out of the hand and discard', () => {
   it('a bench knockout touches the board only', () => {
     const boards = deriveBoardStates(
@@ -177,5 +214,11 @@ describe('battleLogNoPlayer2Turn fixture', () => {
     const h = finalHand();
     expect(h.known).toEqual([]);
     expect(h.known).not.toContain("player2 took a Prize card. A card");
+  });
+
+  // The fixture also plays Artazon to the Stadium spot and then plays it, so
+  // the hand used to drop by two for the one card.
+  it('spends the stadium card exactly once', () => {
+    expect(finalHand().size).toBe(5);
   });
 });

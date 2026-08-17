@@ -6,6 +6,7 @@ import {
   clearZone,
   cloneZone,
   emptyZone,
+  forgetKnown,
   removeKnown,
   removeUnknown,
 } from './zone';
@@ -124,6 +125,11 @@ export function deriveBoardStates(battleLog: BattleLog): BoardState[] {
     drewCount: new RegExp(`^(${who}) drew (\\d+) cards?\\.$`),
     addedUnknown: new RegExp(`^A card was added to (${who})${APOS}s hand\\.$`),
     addedNamed: new RegExp(`^(.+) was added to (${who})${APOS}s hand\\.$`),
+    /**
+     * A stadium placement. Must be tested before `playedCard`, which would
+     * otherwise capture "Artazon to the Stadium spot" as the card name.
+     */
+    stadium: new RegExp(`^(${who}) played (.+) to the Stadium spot\\.$`),
     playedCard: new RegExp(`^(${who}) played (.+)\\.$`),
     discardedNamed: new RegExp(`^(${who}) discarded (?!\\d)(.+)\\.$`),
     discardedCount: new RegExp(`^(${who}) discarded (\\d+) cards?\\.$`),
@@ -456,6 +462,19 @@ export function deriveBoardStates(battleLog: BattleLog): BoardState[] {
       return;
     }
 
+    m = line.match(RE.stadium);
+    if (m) {
+      // PTCGL usually prints the placement and a plain "played X." for the same
+      // card, so the arithmetic belongs to that follow-up line — doing it here
+      // too would drop the hand by two for one card. Forget the identity only.
+      // When the follow-up is absent we over-count by one, which surfaces as an
+      // extra face-down card: the safe direction. Falling through to playedCard
+      // instead decrements for "X to the Stadium spot", a name removeKnown can
+      // never find, leaving the real card face-up in a hand it already left.
+      forgetKnown(state[m[1]].hand, m[2]);
+      return;
+    }
+
     m = line.match(RE.playedCard);
     if (m) { removeKnown(state[m[1]].hand, m[2]); return; }
   };
@@ -473,11 +492,21 @@ export function deriveBoardStates(battleLog: BattleLog): BoardState[] {
     const player = state[m[1]];
     const count = Number(m[2]);
 
-    const names = details
-      .map((d) => d.replace(/^[\s\-•]+/, '').trim())
+    // Stop at the next opening-hand line. Both players' draws can land in one
+    // action's details, and an unbounded scan would hand this player the other
+    // player's seven named cards whenever their list came first.
+    const cleaned = details.map((d) => d.replace(/^[\s\-•]+/, '').trim());
+    const boundary = cleaned.findIndex((d) => RE.openingHand.test(d));
+    const candidates = boundary === -1 ? cleaned : cleaned.slice(0, boundary);
+
+    const names = candidates
       .filter((d) => d.includes(','))
       .map((d) => d.split(',').map((n) => n.trim()).filter(Boolean))
       .find((list) => list.length === count);
+
+    // The opening hand is the entire hand by definition, so replace rather than
+    // append: a line seen twice for one player cannot double the count.
+    clearZone(player.hand);
 
     if (names) {
       for (const name of names) addKnown(player.hand, name);

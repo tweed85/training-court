@@ -95,6 +95,40 @@ describe('opening hand', () => {
     expect(boards[0].misty.hand.known).toEqual([]);
   });
 
+  // Both players' opening hands land in one action's details block, and only
+  // one player's card list is ever printed. The scan must stop at the next
+  // opening-hand line, or the player listed first adopts the other player's
+  // seven named cards. The fixtures all happen to list the log owner first,
+  // so only the reversed order exposes it.
+  it('stops the card-list scan at the next player opening hand', () => {
+    const boards = deriveBoardStates(
+      log([
+        turn(['misty won the coin toss.'], {
+          0: [
+            'misty drew 7 cards for the opening hand. - 7 drawn cards.',
+            'ash drew 7 cards for the opening hand. - 7 drawn cards.',
+            "• Boss's Orders, Drakloak, Iono, Arven, Penny, Rare Candy, Nest Ball",
+          ],
+        }),
+      ])
+    );
+    expect(boards[0].misty.hand).toEqual({ known: [], size: 7 });
+    expect(boards[0].ash.hand.known).toContain("Boss's Orders");
+    expect(boards[0].ash.hand.size).toBe(7);
+  });
+
+  // The opening hand is the whole hand, so a second sighting replaces it.
+  it('replaces the hand rather than adding to it', () => {
+    const boards = deriveBoardStates(
+      log([
+        turn(['ash drew 7 cards for the opening hand.', 'ash drew 7 cards for the opening hand.'], {
+          0: ['- 7 drawn cards.'],
+          1: ['- 7 drawn cards.'],
+        }),
+      ])
+    );
+    expect(boards[0].ash.hand).toEqual({ known: [], size: 7 });
+  });
 });
 
 describe('real fixture invariants', () => {
