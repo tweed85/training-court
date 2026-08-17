@@ -263,6 +263,8 @@ export function deriveBoardStates(battleLog: BattleLog): BoardState[] {
     return true;
   };
 
+  const isBullet = (raw: string | undefined): boolean => !!raw && /^[•▪]/.test(raw.trim());
+
   /** The itemised list belonging to `line`, if `next` is one of matching length. */
   const listFor = (line: string, next: string | undefined): string[] | null => {
     const count = line.match(/\b(\d+) cards?\b/);
@@ -281,9 +283,10 @@ export function deriveBoardStates(battleLog: BattleLog): BoardState[] {
     const names = trimmed.replace(/^[•▪\s]+/, '').split(',').map((n) => n.trim()).filter(Boolean);
     if (names.length !== count) return null;
     // "• (Pokemon Tool) Brave Bangle: 30 damage" and "• 5 Pokemon: 150 damage"
-    // are damage breakdowns wearing the same bullet. Card names open with a
-    // letter or digit and never carry a colon.
-    if (!names.every((n) => /^[A-Z0-9]/.test(n) && !n.includes(':'))) return null;
+    // are damage breakdowns wearing the same bullet. They close with the damage
+    // they dealt, which no card name does. A colon is NOT the tell: "Type: Null"
+    // is a real card, and one rejected name would discard the whole list.
+    if (!names.every((n) => /^[A-Z0-9]/.test(n) && !/\bdamage$/i.test(n))) return null;
     return names;
   };
 
@@ -292,7 +295,7 @@ export function deriveBoardStates(battleLog: BattleLog): BoardState[] {
    * identifies the shape so that a draw is never paired with a shuffle.
    */
   const COUNTED: { key: string; re: RegExp }[] = [
-    { key: 'bench', re: RE.benchUnknown },
+    { key: 'drew', re: RE.drewOne },
     { key: 'drew', re: RE.drewCount },
     { key: 'discarded', re: RE.discardedCount },
     { key: 'shuffled', re: RE.shuffledIntoDeck },
@@ -476,7 +479,7 @@ export function deriveBoardStates(battleLog: BattleLog): BoardState[] {
     // so its hand bookkeeping lives inside that earlier handler instead.
 
     m = line.match(RE.drewOne);
-    if (m) { addUnknown(state[m[1]].hand, 1); return; }
+    if (m) { addUnknown(state[asPlayer ?? m[1]].hand, 1); return; }
 
     m = line.match(RE.drewCount);
     if (m) {
@@ -629,11 +632,18 @@ export function deriveBoardStates(battleLog: BattleLog): BoardState[] {
         const line = action.details[i];
         const names = listFor(line, action.details[i + 1]);
         applyLine(line, names);
-        let next = i + (names ? 2 : 1);
+        // Step over the bullet on its structure, not on whether its names were
+        // trusted: a refused list still occupies a line, and mistaking it for
+        // "no list" hides the second half of a paired event behind it.
+        let next = i + (isBullet(action.details[i + 1]) ? 2 : 1);
 
         // Judge, Iono and Unfair Stamp resolve for both players, and PTCG Live
         // prints both halves under the acting player's name — the actor's
-        // first. Only the log owner's cards are ever itemised, so each half
+        // first. The halves are required to be adjacent: battleLogNewStructure
+        // has one Iono whose halves are separated by the opponent's own
+        // "shuffled their hand" line, and that pair is missed. Reaching across
+        // an intervening line would pair events that merely look alike, and
+        // missing it only over-counts the actor — the safe direction. Only the log owner's cards are ever itemised, so each half
         // carries its own list or none, and the counts routinely differ.
         // Reading the second half as a repeat of the first credits one player
         // twice and leaves their opponent's hand untouched.
@@ -643,7 +653,7 @@ export function deriveBoardStates(battleLog: BattleLog): BoardState[] {
           const secondLine = action.details[next];
           const secondNames = listFor(secondLine, action.details[next + 1]);
           applyLine(secondLine, secondNames, opponentOf(event.actor));
-          next += secondNames ? 2 : 1;
+          next += isBullet(action.details[next + 1]) ? 2 : 1;
         }
 
         i = next - 1;

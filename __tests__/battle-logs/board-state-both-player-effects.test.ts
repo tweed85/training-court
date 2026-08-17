@@ -91,13 +91,58 @@ describe('a both-player effect splits its two halves across the players', () => 
       action('ash played Judge.', [
         '- ash shuffled 3 cards into their deck.',
         '   • Iono, Arven, Nest Ball',
-        '- ash shuffled 6 cards into their deck.',
+        '- ash shuffled 4 cards into their deck.',
       ]),
     ]);
     // ash: drew 4 named, played Judge, shuffled the other 3 back.
     expect(board['ash'].hand.size).toBe(0);
-    // misty: drew 6, shuffled all 6 back.
-    expect(board['misty'].hand.size).toBe(0);
+    // misty: drew 6, shuffled 4 back. Booking both shuffles against ash would
+    // leave this at 6, so the count is what proves the split.
+    expect(board['misty'].hand.size).toBe(2);
+  });
+
+  it('keeps the halves aligned when the first list is refused', () => {
+    // A list that disagrees with its count is untrustworthy, but it still
+    // occupies a line. Treating it as absent hides misty's half behind it.
+    const board = stateOf([
+      action('ash played Judge.', [
+        '- ash drew 4 cards.',
+        '   • Fan Rotom, Iono',
+        '- ash drew 4 cards.',
+      ]),
+    ]);
+    expect(board['ash'].hand.size).toBe(4);
+    expect(board['ash'].hand.known).toEqual([]);
+    expect(board['misty'].hand.size).toBe(4);
+  });
+
+  it('pairs a one-card draw, which PTCGL spells without a digit', () => {
+    const board = stateOf([
+      action('ash played Iono.', ['- ash drew a card.', '- ash drew a card.']),
+    ]);
+    expect(board['ash'].hand.size).toBe(1);
+    expect(board['misty'].hand.size).toBe(1);
+  });
+
+  it('pairs a one-card draw with a counted one', () => {
+    // Iono draws each player their remaining prize count, so the two halves
+    // routinely differ in shape as well as in number.
+    const board = stateOf([
+      action('ash played Iono.', ['- ash drew a card.', '- ash drew 4 cards.']),
+    ]);
+    expect(board['ash'].hand.size).toBe(1);
+    expect(board['misty'].hand.size).toBe(4);
+  });
+
+  it('does not pair two bench placements, which are never a both-player effect', () => {
+    const board = stateOf([
+      action('ash played Poffin.', [
+        '- ash drew 2 cards and played them to the Bench.',
+        '- ash drew 2 cards and played them to the Bench.',
+      ]),
+    ]);
+    expect(board['ash'].bench).toHaveLength(4);
+    expect(board['misty'].bench).toHaveLength(0);
   });
 
   it('leaves a lone counted line with the player who is named', () => {
@@ -156,6 +201,18 @@ describe('a bullet list must look like card names', () => {
     ]);
     expect(board['ash'].hand.known).toEqual([]);
     expect(board['ash'].hand.size).toBe(1);
+  });
+
+  it('accepts a real card name that carries a colon', () => {
+    // "Type: Null" is a genuine card, so a colon cannot be what marks a
+    // breakdown -- and one rejected name would discard the whole list.
+    const board = stateOf([
+      action('ash played Professor.', [
+        '- ash drew 2 cards.',
+        '   • Type: Null, Nest Ball',
+      ]),
+    ]);
+    expect(board['ash'].hand.known).toEqual(['Type: Null', 'Nest Ball']);
   });
 });
 
