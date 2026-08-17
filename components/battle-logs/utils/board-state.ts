@@ -263,7 +263,31 @@ export function deriveBoardStates(battleLog: BattleLog): BoardState[] {
     return true;
   };
 
-  const applyLine = (raw: string): void => {
+  /** The itemised list belonging to `line`, if `next` is one of matching length. */
+  const listFor = (line: string, next: string | undefined): string[] | null => {
+    const count = line.match(/\b(\d+) cards?\b/);
+    return count ? itemised(next, Number(count[1])) : null;
+  };
+
+  /**
+   * Parse a "• A, B, C" detail into card names, but only trust it when it
+   * holds exactly as many names as the line claimed. A mismatch means the
+   * bullet belongs to something else, and guessing would name the wrong card.
+   */
+  const itemised = (detail: string | undefined, count: number): string[] | null => {
+    if (!detail) return null;
+    const trimmed = detail.trim();
+    if (!/^[•▪]/.test(trimmed)) return null;
+    const names = trimmed.replace(/^[•▪\s]+/, '').split(',').map((n) => n.trim()).filter(Boolean);
+    return names.length === count ? names : null;
+  };
+
+  /**
+   * `named` carries the itemised list that followed this line, when the log
+   * provided one. Every counted event prefers those identities and falls back
+   * to an anonymous count only when the list is absent or disagrees.
+   */
+  const applyLine = (raw: string, named?: string[] | null): void => {
     const line = raw.replace(/^[\s\-•]+/, '').trim();
     if (!line) return;
 
@@ -295,7 +319,12 @@ export function deriveBoardStates(battleLog: BattleLog): BoardState[] {
 
     m = line.match(RE.benchUnknown);
     if (m) {
-      pendingBenchReveal = { player: m[1], count: Number(m[2]) };
+      if (named) {
+        for (const name of named) benchNew(state[m[1]], newPokemon(name));
+      } else {
+        // No list on this line; a bare reveal line may still follow.
+        pendingBenchReveal = { player: m[1], count: Number(m[2]) };
+      }
       return;
     }
 
@@ -411,7 +440,12 @@ export function deriveBoardStates(battleLog: BattleLog): BoardState[] {
     if (m) { addUnknown(state[m[1]].hand, 1); return; }
 
     m = line.match(RE.drewCount);
-    if (m) { addUnknown(state[m[1]].hand, Number(m[2])); return; }
+    if (m) {
+      const hand = state[m[1]].hand;
+      if (named) for (const name of named) addKnown(hand, name);
+      else addUnknown(hand, Number(m[2]));
+      return;
+    }
 
     m = line.match(RE.drewNamed);
     if (m) { addKnown(state[m[1]].hand, m[2]); return; }
@@ -433,16 +467,35 @@ export function deriveBoardStates(battleLog: BattleLog): BoardState[] {
     if (m) { clearZone(state[m[1]].hand); return; }
 
     m = line.match(RE.shuffledIntoDeck);
-    if (m) { removeUnknown(state[m[1]].hand, Number(m[2])); return; }
+    if (m) {
+      const hand = state[m[1]].hand;
+      // Naming them matters: removeUnknown would clamp out the OLDEST known
+      // cards, which is how identities we still hold went missing.
+      if (named) for (const name of named) removeKnown(hand, name);
+      else removeUnknown(hand, Number(m[2]));
+      return;
+    }
 
     m = line.match(RE.bottomOfDeck);
-    if (m) { removeUnknown(state[m[1]].hand, Number(m[2])); return; }
+    if (m) {
+      const hand = state[m[1]].hand;
+      if (named) for (const name of named) removeKnown(hand, name);
+      else removeUnknown(hand, Number(m[2]));
+      return;
+    }
 
     m = line.match(RE.discardedCount);
     if (m) {
       const player = state[m[1]];
-      removeUnknown(player.hand, Number(m[2]));
-      addUnknown(player.discard, Number(m[2]));
+      if (named) {
+        for (const name of named) {
+          removeKnown(player.hand, name);
+          addKnown(player.discard, name);
+        }
+      } else {
+        removeUnknown(player.hand, Number(m[2]));
+        addUnknown(player.discard, Number(m[2]));
+      }
       return;
     }
 
@@ -520,7 +573,7 @@ export function deriveBoardStates(battleLog: BattleLog): BoardState[] {
     for (const action of section.actions) {
       // The opening hand consumes its own details, so skip the flat pass for it.
       if (applyOpeningHand(action.title, action.details)) continue;
-      applyLine(action.title);
+      applyLine(action.title, listFor(action.title, action.details[0]));
 
       // getTurnActions treats "drew 7 cards for the opening hand" as a
       // subaction indicator, so in the real corpus that line — and both
@@ -530,7 +583,17 @@ export function deriveBoardStates(battleLog: BattleLog): BoardState[] {
       // candidate card list.
       for (let i = 0; i < action.details.length; i += 1) {
         if (applyOpeningHand(action.details[i], action.details.slice(i + 1))) continue;
-        applyLine(action.details[i]);
+
+        const line = action.details[i];
+        const names = listFor(line, action.details[i + 1]);
+        applyLine(line, names);
+
+        if (names) {
+          i += 1; // the itemised list belongs to the line just applied
+          // PTCG Live then repeats that counted line verbatim. Applying it a
+          // second time is what inflated every hand and discard count.
+          if (action.details[i + 1]?.trim() === line.trim()) i += 1;
+        }
       }
     }
     flushPendingReveal();
