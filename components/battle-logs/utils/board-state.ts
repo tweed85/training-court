@@ -96,7 +96,6 @@ export function deriveBoardStates(battleLog: BattleLog): BoardState[] {
     drewCount: new RegExp(`^(${who}) drew (\\d+) cards?\\.$`),
     addedUnknown: new RegExp(`^A card was added to (${who})${APOS}s hand\\.$`),
     addedNamed: new RegExp(`^(.+) was added to (${who})${APOS}s hand\\.$`),
-    movedToHand: new RegExp(`^(${who}) moved (?:${who})${APOS}s (.+) to their hand\\.$`),
     playedCard: new RegExp(`^(${who}) played (.+)\\.$`),
     discardedNamed: new RegExp(`^(${who}) discarded (?!\\d)(.+)\\.$`),
     discardedCount: new RegExp(`^(${who}) discarded (\\d+) cards?\\.$`),
@@ -349,6 +348,9 @@ export function deriveBoardStates(battleLog: BattleLog): BoardState[] {
     // ones (`A card` is capitalised and would otherwise be recorded as a card
     // called "A card"), and the placement patterns above already consumed
     // "played X to the Bench", which would otherwise look like a plain play.
+    // The bounce-to-hand case ("X moved X's Y to their hand") is not handled
+    // here: RE.toHand above already matches and returns on that line shape,
+    // so its hand bookkeeping lives inside that earlier handler instead.
 
     m = line.match(RE.drewOne);
     if (m) { addUnknown(state[m[1]].hand, 1); return; }
@@ -364,9 +366,6 @@ export function deriveBoardStates(battleLog: BattleLog): BoardState[] {
 
     m = line.match(RE.addedNamed);
     if (m) { addKnown(state[m[2]].hand, m[1]); return; }
-
-    m = line.match(RE.movedToHand);
-    if (m) { addKnown(state[m[1]].hand, m[2]); return; }
 
     m = line.match(RE.shuffledHand);
     if (m) { clearZone(state[m[1]].hand); return; }
