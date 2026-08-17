@@ -2,10 +2,25 @@ import { BattleLogDetectedStrings, detectBattleLogLanguage, determineWinnerFromL
 import { determineArchetype } from "../../archetype/utils/archetype.utils";
 import { BattleLog, BattleLogAction, BattleLogPlayer, BattleLogTurn } from "./battle-log.types";
 
+/**
+ * Newer PTCG Live exports stamp every card with its set and collector number:
+ * "pandapanada played (me2-5_247) Dreepy to the Active Spot." The card catalog
+ * is keyed on the bare name, so the stamp has to come off or every image
+ * lookup misses and the code renders as part of the name.
+ *
+ * A stamp is lowercase alphanumerics with `-`/`_` separators, and it always
+ * precedes the name it stamps. Parenthesised text that belongs to a card name
+ * carries capitals -- "(Pokemon Tool)", "(Prof. Antiqua)", "(G-Cis)" -- so
+ * requiring lowercase keeps those intact.
+ */
+export function stripCardSetCodes(line: string): string {
+  return line.replace(/\([a-z0-9]+(?:[-_][a-z0-9]+)*\)\s+(?=[^\s])/g, '');
+}
+
 export function trimBattleLog(log: string): string[] {
   return log.split('\n').reduce((acc: string[], curr: string) => {
     if (curr.length === 0 || curr === '\n' || curr.includes('shuffled their deck.')) return acc;
-    return [...acc, curr];
+    return [...acc, stripCardSetCodes(curr)];
   }, []);
 }
 
