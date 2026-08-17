@@ -42,6 +42,8 @@ export function BattleLogCarousel(props: BattleLogCarouselProps) {
           for (const benched of player.bench) {
             if (!benched.unknown) names.add(benched.name);
           }
+          for (const name of player.hand.known) names.add(name);
+          for (const name of player.discard.known) names.add(name);
         }
       }
       return Array.from(names);

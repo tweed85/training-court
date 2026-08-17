@@ -10,7 +10,10 @@ import {
   SPECIAL_ENERGY_STYLE,
   classifyAttachment,
 } from './attachment';
+import { ZoneCards } from './ZoneCards';
+import { DiscardPile } from './DiscardPile';
 import type { BoardState, PokemonInPlay } from '../utils/board-state.types';
+import type { Zone } from '../utils/zone';
 import type { LookupCard } from '@/app/api/ptcg/cards/lookup/route';
 
 interface BoardStateViewProps {
@@ -190,11 +193,15 @@ function PlayerRow({
   name,
   active,
   bench,
+  hand,
+  discard,
   cards,
 }: {
   name: string;
   active: PokemonInPlay | null;
   bench: PokemonInPlay[];
+  hand: Zone;
+  discard: Zone;
   cards: Record<string, LookupCard>;
 }) {
   const gt = useGT();
@@ -220,6 +227,15 @@ function PlayerRow({
           </div>
         )}
       </div>
+      {hand.size > 0 && (
+        <div className="flex flex-col gap-1">
+          <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+            {gt('Hand', { $id: 'battleLogs.board.hand' })} ({hand.size})
+          </span>
+          <ZoneCards zone={hand} cards={cards} />
+        </div>
+      )}
+      <DiscardPile zone={discard} cards={cards} />
     </div>
   );
 }
@@ -238,6 +254,8 @@ export function BoardStateView({ board, cards }: BoardStateViewProps) {
           name={playerName}
           active={playerBoard.active}
           bench={playerBoard.bench}
+          hand={playerBoard.hand}
+          discard={playerBoard.discard}
           cards={cards}
         />
       ))}

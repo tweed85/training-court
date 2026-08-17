@@ -18,10 +18,14 @@ const board = {
   ash: {
     active: { name: 'Drakloak', evolvedFrom: ['Dreepy'], damage: 60, attachments: ['Basic Psychic Energy'] },
     bench: [{ name: 'Hoothoot', evolvedFrom: [], damage: 0, attachments: [] }],
+    hand: { known: [], size: 0 },
+    discard: { known: [], size: 0 },
   },
   misty: {
     active: { name: "Team Rocket's Tarountula", evolvedFrom: [], damage: 0, attachments: [] },
     bench: [{ name: '', evolvedFrom: [], damage: 0, attachments: [], unknown: true }],
+    hand: { known: [], size: 0 },
+    discard: { known: [], size: 0 },
   },
 };
 
@@ -59,13 +63,34 @@ describe('BoardStateView', () => {
   });
 
   it('falls back to the card name when no image is available', () => {
-    const noImage = { ash: { active: { name: 'Mystery', evolvedFrom: [], damage: 0, attachments: [] }, bench: [] } };
+    const noImage = {
+      ash: {
+        active: { name: 'Mystery', evolvedFrom: [], damage: 0, attachments: [] },
+        bench: [],
+        hand: { known: [], size: 0 },
+        discard: { known: [], size: 0 },
+      },
+    };
     render(<BoardStateView board={noImage as any} cards={{}} />);
     expect(screen.getByText('Mystery')).toBeTruthy();
   });
 
   it('renders an empty board without crashing', () => {
-    const { container } = render(<BoardStateView board={{ ash: { active: null, bench: [] } } as any} cards={{}} />);
+    const { container } = render(
+      <BoardStateView
+        board={
+          {
+            ash: {
+              active: null,
+              bench: [],
+              hand: { known: [], size: 0 },
+              discard: { known: [], size: 0 },
+            },
+          } as any
+        }
+        cards={{}}
+      />
+    );
     expect(container).toBeTruthy();
   });
 });
@@ -75,6 +100,8 @@ describe('BoardStateView attachment chips', () => {
     ash: {
       active: { name: 'Drakloak', evolvedFrom: [], damage: 0, attachments },
       bench: [],
+      hand: { known: [], size: 0 },
+      discard: { known: [], size: 0 },
     },
   });
   const cards = { Drakloak: { name: 'Drakloak', imageUrl: 'https://cdn.example/d.png', hp: 120 } };
@@ -118,5 +145,36 @@ describe('BoardStateView attachment chips', () => {
     render(<BoardStateView board={withAttachments(many) as any} cards={cards} />);
     expect(screen.getByText('+1')).toBeTruthy();
     expect(screen.getByTitle('Sparkling Crystal')).toBeTruthy();
+  });
+});
+
+describe('BoardStateView zones', () => {
+  const board = {
+    ash: {
+      active: { name: 'Drakloak', evolvedFrom: [], damage: 0, attachments: [] },
+      bench: [],
+      hand: { known: ['Iono'], size: 3 },
+      discard: { known: [], size: 6 },
+    },
+  };
+  const zoneCards = { Iono: { name: 'Iono', imageUrl: 'https://cdn.example/iono.png' } };
+
+  it('renders the hand with placeholders for the unknown cards', () => {
+    render(<BoardStateView board={board as any} cards={zoneCards as any} />);
+    expect(screen.getByAltText('Iono')).toBeTruthy();
+    expect(screen.getAllByTestId('zone-unknown-card').length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('renders the discard pile collapsed with its count', () => {
+    render(<BoardStateView board={board as any} cards={zoneCards as any} />);
+    expect(screen.getByTestId('discard-toggle').textContent).toContain('6');
+  });
+
+  it('omits both zones when they are empty', () => {
+    const bare = {
+      ash: { active: null, bench: [], hand: { known: [], size: 0 }, discard: { known: [], size: 0 } },
+    };
+    render(<BoardStateView board={bare as any} cards={{}} />);
+    expect(screen.queryByTestId('discard-toggle')).toBeNull();
   });
 });
