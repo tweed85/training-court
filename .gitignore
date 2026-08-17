@@ -41,6 +41,3 @@ next-env.d.ts
 # local settings
 settings.local.json
 docs/TODO.md
-
-# subagent-driven-development scratch
-.superpowers/
