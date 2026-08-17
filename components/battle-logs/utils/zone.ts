@@ -33,10 +33,12 @@ const clamp = (zone: Zone): void => {
 export function addKnown(zone: Zone, name: string): void {
   zone.known.push(name);
   zone.size += 1;
+  clamp(zone);
 }
 
 export function addUnknown(zone: Zone, count: number): void {
   zone.size += count;
+  clamp(zone);
 }
 
 /**

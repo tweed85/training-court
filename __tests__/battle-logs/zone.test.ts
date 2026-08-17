@@ -86,4 +86,21 @@ describe('zone arithmetic', () => {
     addKnown(z, 'Arven');
     expect(snapshot).toEqual({ known: ['Iono'], size: 1 });
   });
+
+  it('ignores a negative unknown count rather than going negative', () => {
+    const z = emptyZone();
+    addUnknown(z, 3);
+    addUnknown(z, -10);
+    expect(z.size).toBe(0);
+    expect(z.known).toEqual([]);
+  });
+
+  it('keeps known within size when a negative count shrinks the zone', () => {
+    const z = emptyZone();
+    addKnown(z, 'Iono');
+    addKnown(z, 'Arven');
+    addUnknown(z, -1);
+    expect(z.size).toBe(1);
+    expect(z.known).toEqual(['Arven']);
+  });
 });
