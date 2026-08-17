@@ -1,3 +1,5 @@
+import type { Zone } from './zone';
+
 /**
  * The observable board, reconstructed from a PTCG Live log.
  *
@@ -21,6 +23,10 @@ export interface PokemonInPlay {
 export interface PlayerBoard {
   active: PokemonInPlay | null;
   bench: PokemonInPlay[];
+  /** Cards held. Yours is largely known; the opponent's largely is not. */
+  hand: Zone;
+  /** Cards in the discard pile, oldest first. */
+  discard: Zone;
 }
 
 /** Keyed by player name exactly as it appears in the log. */

@@ -1,5 +1,14 @@
 import type { BattleLog } from './battle-log.types';
 import type { BoardState, PlayerBoard, PokemonInPlay } from './board-state.types';
+import {
+  addKnown,
+  addUnknown,
+  clearZone,
+  cloneZone,
+  emptyZone,
+  removeKnown,
+  removeUnknown,
+} from './zone';
 
 const MAX_BENCH = 5;
 
@@ -19,11 +28,18 @@ const newPokemon = (name: string, unknown = false): PokemonInPlay => ({
   ...(unknown ? { unknown: true } : {}),
 });
 
-const emptyBoard = (): PlayerBoard => ({ active: null, bench: [] });
+const emptyBoard = (): PlayerBoard => ({
+  active: null,
+  bench: [],
+  hand: emptyZone(),
+  discard: emptyZone(),
+});
 
 const cloneBoard = (board: PlayerBoard): PlayerBoard => ({
   active: board.active ? { ...board.active, evolvedFrom: [...board.active.evolvedFrom], attachments: [...board.active.attachments] } : null,
   bench: board.bench.map((p) => ({ ...p, evolvedFrom: [...p.evolvedFrom], attachments: [...p.attachments] })),
+  hand: cloneZone(board.hand),
+  discard: cloneZone(board.discard),
 });
 
 const cloneState = (state: BoardState): BoardState => {
@@ -75,6 +91,18 @@ export function deriveBoardStates(battleLog: BattleLog): BoardState[] {
     attach: new RegExp(`^(${who}) attached (.+) to (.+) (?:in the Active Spot|on the Bench)\\.$`),
     damage: new RegExp(`^(${who})${APOS}s (.+) used (.+) on (${who})${APOS}s (.+) for (\\d+) damage\\.$`),
     status: new RegExp(`^(${who})${APOS}s (.+) is now (Asleep|Paralyzed|Confused|Poisoned|Burned)\\.$`),
+    drewNamed: new RegExp(`^(${who}) drew (?!a card\\b|\\d)(.+)\\.$`),
+    drewOne: new RegExp(`^(${who}) drew a card\\.$`),
+    drewCount: new RegExp(`^(${who}) drew (\\d+) cards?\\.$`),
+    addedUnknown: new RegExp(`^A card was added to (${who})${APOS}s hand\\.$`),
+    addedNamed: new RegExp(`^(.+) was added to (${who})${APOS}s hand\\.$`),
+    movedToHand: new RegExp(`^(${who}) moved (?:${who})${APOS}s (.+) to their hand\\.$`),
+    playedCard: new RegExp(`^(${who}) played (.+)\\.$`),
+    discardedNamed: new RegExp(`^(${who}) discarded (?!\\d)(.+)\\.$`),
+    discardedCount: new RegExp(`^(${who}) discarded (\\d+) cards?\\.$`),
+    shuffledIntoDeck: new RegExp(`^(${who}) shuffled (\\d+) cards? into their deck\\.$`),
+    bottomOfDeck: new RegExp(`^(${who}) put (\\d+) cards? on the bottom of their deck\\.$`),
+    shuffledHand: new RegExp(`^(${who}) shuffled their hand\\.$`),
   };
 
   const state: BoardState = {};
@@ -212,12 +240,14 @@ export function deriveBoardStates(battleLog: BattleLog): BoardState[] {
       // A Pokemon already active is displaced only by an explicit retreat or KO.
       if (board.active === null) board.active = newPokemon(m[2]);
       else benchNew(board, newPokemon(m[2]));
+      removeKnown(board.hand, m[2]);
       return;
     }
 
     m = line.match(RE.bench);
     if (m) {
       benchNew(state[m[1]], newPokemon(m[2]));
+      removeKnown(state[m[1]].hand, m[2]);
       return;
     }
 
@@ -248,7 +278,13 @@ export function deriveBoardStates(battleLog: BattleLog): BoardState[] {
 
     m = line.match(RE.toHand);
     if (m) {
-      if (m[1] === m[2] && !CARD_COUNT_PHRASE.test(m[3])) removeFromPlay(state[m[1]], m[3]);
+      // This already-existing handler matches and returns before the new hand
+      // block below is reached, so the addition to hand has to live here too:
+      // a Pokemon bounced back by its own owner becomes a known card in hand.
+      if (m[1] === m[2] && !CARD_COUNT_PHRASE.test(m[3])) {
+        removeFromPlay(state[m[1]], m[3]);
+        addKnown(state[m[1]].hand, m[3]);
+      }
       return;
     }
 
@@ -279,6 +315,7 @@ export function deriveBoardStates(battleLog: BattleLog): BoardState[] {
     if (m) {
       const target = findInPlay(state[m[1]], m[3]);
       if (target) target.attachments.push(m[2]);
+      removeKnown(state[m[1]].hand, m[2]);
       return;
     }
 
@@ -306,6 +343,58 @@ export function deriveBoardStates(battleLog: BattleLog): BoardState[] {
       const index = findOnBench(board, m[2]);
       if (index !== -1) board.bench.splice(index, 1);
     }
+
+    // --- hand ---------------------------------------------------------------
+    // Order matters twice over: the unnamed forms are tested before the named
+    // ones (`A card` is capitalised and would otherwise be recorded as a card
+    // called "A card"), and the placement patterns above already consumed
+    // "played X to the Bench", which would otherwise look like a plain play.
+
+    m = line.match(RE.drewOne);
+    if (m) { addUnknown(state[m[1]].hand, 1); return; }
+
+    m = line.match(RE.drewCount);
+    if (m) { addUnknown(state[m[1]].hand, Number(m[2])); return; }
+
+    m = line.match(RE.drewNamed);
+    if (m) { addKnown(state[m[1]].hand, m[2]); return; }
+
+    m = line.match(RE.addedUnknown);
+    if (m) { addUnknown(state[m[1]].hand, 1); return; }
+
+    m = line.match(RE.addedNamed);
+    if (m) { addKnown(state[m[2]].hand, m[1]); return; }
+
+    m = line.match(RE.movedToHand);
+    if (m) { addKnown(state[m[1]].hand, m[2]); return; }
+
+    m = line.match(RE.shuffledHand);
+    if (m) { clearZone(state[m[1]].hand); return; }
+
+    m = line.match(RE.shuffledIntoDeck);
+    if (m) { removeUnknown(state[m[1]].hand, Number(m[2])); return; }
+
+    m = line.match(RE.bottomOfDeck);
+    if (m) { removeUnknown(state[m[1]].hand, Number(m[2])); return; }
+
+    m = line.match(RE.discardedCount);
+    if (m) {
+      const player = state[m[1]];
+      removeUnknown(player.hand, Number(m[2]));
+      addUnknown(player.discard, Number(m[2]));
+      return;
+    }
+
+    m = line.match(RE.discardedNamed);
+    if (m) {
+      const player = state[m[1]];
+      removeKnown(player.hand, m[2]);
+      addKnown(player.discard, m[2]);
+      return;
+    }
+
+    m = line.match(RE.playedCard);
+    if (m) { removeKnown(state[m[1]].hand, m[2]); return; }
   };
 
   return battleLog.sections.map((section) => {
