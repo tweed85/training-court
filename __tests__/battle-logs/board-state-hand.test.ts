@@ -1,5 +1,7 @@
 import type { BattleLog, BattleLogTurn } from '../../components/battle-logs/utils/battle-log.types';
 import { deriveBoardStates } from '../../components/battle-logs/utils/board-state';
+import { parseBattleLog } from '../../components/battle-logs/utils/battle-log.utils';
+import { battleLogNoPlayer2Turn } from '../../components/battle-logs/utils/testing-files/battleLogNoPlayer2Turn';
 import { unknownCount } from '../../components/battle-logs/utils/zone';
 
 const turn = (lines: string[]): BattleLogTurn => ({
@@ -59,6 +61,27 @@ describe('hand grammar — additions', () => {
   it('a Pokemon bounced to hand is known', () => {
     expect(hand(["ash moved ash's Froakie to their hand."]).known).toEqual(['Froakie']);
   });
+
+  // PTCGL puts the prize take and the hand addition on one physical line, which
+  // defeats the ^-anchored unnamed pattern and lets the named one's greedy
+  // capture eat the first sentence.
+  it('does not fold a preceding sentence into an unnamed addition', () => {
+    const h = hand(["ash took a Prize card. A card was added to ash's hand."]);
+    expect(h.known).toEqual([]);
+    expect(h.size).toBe(1);
+  });
+
+  it('does not fold a preceding sentence into a named addition', () => {
+    const h = hand(["ash took a Prize card. Iono was added to ash's hand."]);
+    expect(h.known).toEqual([]);
+    expect(h.size).toBe(1);
+  });
+
+  // The sentence-break guard keys on period-space, so a period inside the name
+  // itself must still resolve face-up.
+  it('still names a card whose own name carries a period', () => {
+    expect(hand(["Mime Jr. was added to ash's hand."]).known).toEqual(['Mime Jr.']);
+  });
 });
 
 describe('hand grammar — removals', () => {
@@ -113,5 +136,46 @@ describe('hand grammar — removals', () => {
     const boards = deriveBoardStates(log([turn(['ash drew Iono.', 'misty drew a card.'])]));
     expect(boards[0].ash.hand.known).toEqual(['Iono']);
     expect(boards[0].misty.hand).toEqual({ known: [], size: 1 });
+  });
+
+  // "ash discarded a card." slips past the count pattern, which needs a digit.
+  it('does not invent a card named "a card"', () => {
+    const h = hand(['ash drew 3 cards.', 'ash discarded a card.']);
+    expect(h.known).toEqual([]);
+    expect(h.size).toBe(2);
+  });
+});
+
+describe('knockouts stay out of the hand and discard', () => {
+  it('a bench knockout touches the board only', () => {
+    const boards = deriveBoardStates(
+      log([
+        turn([
+          'ash drew 3 cards.',
+          'ash played Hoothoot to the Bench.',
+          "ash's Hoothoot was Knocked Out!",
+        ]),
+      ])
+    );
+    expect(boards[0].ash.bench).toEqual([]);
+    expect(boards[0].ash.hand).toEqual({ known: [], size: 2 });
+    expect(boards[0].ash.discard).toEqual({ known: [], size: 0 });
+  });
+});
+
+describe('battleLogNoPlayer2Turn fixture', () => {
+  const finalHand = () => {
+    const parsed = parseBattleLog(battleLogNoPlayer2Turn, 'l', '2026-01-01', null, null, null);
+    const boards = deriveBoardStates(parsed);
+    return boards[boards.length - 1].player2.hand;
+  };
+
+  // The fixture's "player2 took a Prize card. A card was added to player2's
+  // hand." used to land in the hand as a face-up card with that whole sentence
+  // for a name, and got POSTed to the card-lookup route as one.
+  it('never names a card after a sentence break', () => {
+    const h = finalHand();
+    expect(h.known).toEqual([]);
+    expect(h.known).not.toContain("player2 took a Prize card. A card");
   });
 });

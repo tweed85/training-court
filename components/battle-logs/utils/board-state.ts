@@ -18,6 +18,34 @@ const APOS = "['’]";
 /** "Player2 moved Player2's 9 cards to their deck." is bookkeeping, not a bounce. */
 const CARD_COUNT_PHRASE = /^\d+\s+cards?$/i;
 
+/**
+ * A count wearing a card name's clothes: "1 card", "3 cards", "a card".
+ *
+ * The count and named patterns disagree about `was` vs `were`, so shapes like
+ * "1 card was discarded from ash's Pikipek." and "ash discarded a card." reach
+ * the named handlers, which would record a card literally called "1 card".
+ */
+const CARD_PLACEHOLDER_PHRASE = /^(?:(\d+)\s+cards?|a\s+card)$/i;
+
+/** How many cards a count-word capture stands for; 0 when it is a real name. */
+const placeholderCount = (name: string): number => {
+  const m = name.match(CARD_PLACEHOLDER_PHRASE);
+  if (!m) return 0;
+  return m[1] ? Number(m[1]) : 1;
+};
+
+/**
+ * PTCGL puts two sentences on one physical line ("X took a Prize card. A card
+ * was added to X's hand."), and the greedy `(.+)` of a named pattern swallows
+ * the first one. No real card name spans a sentence break, so a capture holding
+ * one is a parse artifact and must degrade to a face-down card.
+ *
+ * Period-space rather than any period: a name that merely contains one, such as
+ * "Mime Jr.", must still resolve as named. Only a following space makes the
+ * period a sentence boundary.
+ */
+const SENTENCE_BREAK = /\. /;
+
 const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 const newPokemon = (name: string, unknown = false): PokemonInPlay => ({
@@ -344,6 +372,7 @@ export function deriveBoardStates(battleLog: BattleLog): BoardState[] {
       }
       const index = findOnBench(board, m[2]);
       if (index !== -1) board.bench.splice(index, 1);
+      return;
     }
 
     // --- discard ------------------------------------------------------------
@@ -354,7 +383,14 @@ export function deriveBoardStates(battleLog: BattleLog): BoardState[] {
     if (m) { addUnknown(state[m[2]].discard, Number(m[1])); return; }
 
     m = line.match(RE.discardedFromPokemonNamed);
-    if (m) { addKnown(state[m[2]].discard, m[1]); return; }
+    if (m) {
+      // The count pattern above insists on "were", so the singular
+      // "1 card was discarded from ash's Pikipek." lands here instead.
+      const placeholder = placeholderCount(m[1]);
+      if (placeholder) addUnknown(state[m[2]].discard, placeholder);
+      else addKnown(state[m[2]].discard, m[1]);
+      return;
+    }
 
     // --- hand ---------------------------------------------------------------
     // Order matters twice over: the unnamed forms are tested before the named
@@ -378,7 +414,14 @@ export function deriveBoardStates(battleLog: BattleLog): BoardState[] {
     if (m) { addUnknown(state[m[1]].hand, 1); return; }
 
     m = line.match(RE.addedNamed);
-    if (m) { addKnown(state[m[2]].hand, m[1]); return; }
+    if (m) {
+      // RE.addedUnknown is ^-anchored, so it cannot fire when PTCGL shares the
+      // physical line with another sentence ("X took a Prize card. A card was
+      // added to X's hand."). The greedy capture here then swallows the prefix.
+      if (SENTENCE_BREAK.test(m[1])) addUnknown(state[m[2]].hand, 1);
+      else addKnown(state[m[2]].hand, m[1]);
+      return;
+    }
 
     m = line.match(RE.shuffledHand);
     if (m) { clearZone(state[m[1]].hand); return; }
@@ -400,8 +443,16 @@ export function deriveBoardStates(battleLog: BattleLog): BoardState[] {
     m = line.match(RE.discardedNamed);
     if (m) {
       const player = state[m[1]];
-      removeKnown(player.hand, m[2]);
-      addKnown(player.discard, m[2]);
+      // The (?!\d) guard on this pattern only blocks digits, so the written-out
+      // "ash discarded a card." still reaches here without naming anything.
+      const placeholder = placeholderCount(m[2]);
+      if (placeholder) {
+        removeUnknown(player.hand, placeholder);
+        addUnknown(player.discard, placeholder);
+      } else {
+        removeKnown(player.hand, m[2]);
+        addKnown(player.discard, m[2]);
+      }
       return;
     }
 
@@ -421,6 +472,7 @@ export function deriveBoardStates(battleLog: BattleLog): BoardState[] {
 
     const player = state[m[1]];
     const count = Number(m[2]);
+
     const names = details
       .map((d) => d.replace(/^[\s\-•]+/, '').trim())
       .filter((d) => d.includes(','))

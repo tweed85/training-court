@@ -46,6 +46,21 @@ describe('discard grammar', () => {
     expect(boards[0].ash.discard.known).toEqual(['Iono']);
   });
 
+  // The count pattern insists on "were", so the singular line reaches the named
+  // pattern and used to record a card literally called "1 card".
+  it('a single card discarded from a Pokemon is not a card named "1 card"', () => {
+    const boards = deriveBoardStates(log([turn(["1 card was discarded from ash's Pikipek."])]));
+    expect(boards[0].ash.discard).toEqual({ known: [], size: 1 });
+  });
+
+  // The named-discard pattern only guards against digits, so the written-out
+  // count used to become a card called "a card".
+  it('an unnamed discard from hand is not a card named "a card"', () => {
+    const boards = deriveBoardStates(log([turn(['ash drew 3 cards.', 'ash discarded a card.'])]));
+    expect(boards[0].ash.discard).toEqual({ known: [], size: 1 });
+    expect(boards[0].ash.hand).toEqual({ known: [], size: 2 });
+  });
+
   it('accumulates across turns and never shrinks', () => {
     const boards = deriveBoardStates(
       log([
@@ -79,6 +94,7 @@ describe('opening hand', () => {
     expect(boards[0].misty.hand.size).toBe(7);
     expect(boards[0].misty.hand.known).toEqual([]);
   });
+
 });
 
 describe('real fixture invariants', () => {
