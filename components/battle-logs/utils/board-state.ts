@@ -102,6 +102,9 @@ export function deriveBoardStates(battleLog: BattleLog): BoardState[] {
     shuffledIntoDeck: new RegExp(`^(${who}) shuffled (\\d+) cards? into their deck\\.$`),
     bottomOfDeck: new RegExp(`^(${who}) put (\\d+) cards? on the bottom of their deck\\.$`),
     shuffledHand: new RegExp(`^(${who}) shuffled their hand\\.$`),
+    discardedFromPokemonCount: new RegExp(`^(\\d+) cards? were discarded from (${who})${APOS}s (.+)\\.$`),
+    discardedFromPokemonNamed: new RegExp(`^(.+) was discarded from (${who})${APOS}s (.+)\\.$`),
+    openingHand: new RegExp(`^(${who}) drew (\\d+) cards for the opening hand\\.`),
   };
 
   const state: BoardState = {};
@@ -343,6 +346,16 @@ export function deriveBoardStates(battleLog: BattleLog): BoardState[] {
       if (index !== -1) board.bench.splice(index, 1);
     }
 
+    // --- discard ------------------------------------------------------------
+    // Count form before named form: "3 cards were discarded from …" would
+    // otherwise be recorded as a card named "3 cards".
+
+    m = line.match(RE.discardedFromPokemonCount);
+    if (m) { addUnknown(state[m[2]].discard, Number(m[1])); return; }
+
+    m = line.match(RE.discardedFromPokemonNamed);
+    if (m) { addKnown(state[m[2]].discard, m[1]); return; }
+
     // --- hand ---------------------------------------------------------------
     // Order matters twice over: the unnamed forms are tested before the named
     // ones (`A card` is capitalised and would otherwise be recorded as a card
@@ -396,10 +409,48 @@ export function deriveBoardStates(battleLog: BattleLog): BoardState[] {
     if (m) { removeKnown(state[m[1]].hand, m[2]); return; }
   };
 
+  /**
+   * The opening hand is the one event that needs the action rather than the
+   * line: the card list arrives as a detail, and only the analysed player's is
+   * ever listed. A detail line that is a comma-separated run of card names, and
+   * holds as many names as were drawn, is that list.
+   */
+  const applyOpeningHand = (title: string, details: string[]): boolean => {
+    const m = title.trim().match(RE.openingHand);
+    if (!m) return false;
+
+    const player = state[m[1]];
+    const count = Number(m[2]);
+    const names = details
+      .map((d) => d.replace(/^[\s\-•]+/, '').trim())
+      .filter((d) => d.includes(','))
+      .map((d) => d.split(',').map((n) => n.trim()).filter(Boolean))
+      .find((list) => list.length === count);
+
+    if (names) {
+      for (const name of names) addKnown(player.hand, name);
+    } else {
+      addUnknown(player.hand, count);
+    }
+    return true;
+  };
+
   return battleLog.sections.map((section) => {
     for (const action of section.actions) {
+      // The opening hand consumes its own details, so skip the flat pass for it.
+      if (applyOpeningHand(action.title, action.details)) continue;
       applyLine(action.title);
-      for (const detail of action.details) applyLine(detail);
+
+      // getTurnActions treats "drew 7 cards for the opening hand" as a
+      // subaction indicator, so in the real corpus that line — and both
+      // players' worth of it — ends up folded into an unrelated action's
+      // details rather than becoming its own title. Check every detail line
+      // for the pattern too, offering it the remainder of the details as its
+      // candidate card list.
+      for (let i = 0; i < action.details.length; i += 1) {
+        if (applyOpeningHand(action.details[i], action.details.slice(i + 1))) continue;
+        applyLine(action.details[i]);
+      }
     }
     flushPendingReveal();
     return cloneState(state);
