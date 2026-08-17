@@ -1,5 +1,6 @@
 import { getIfLineCouldContainArchetype, Language } from "@/lib/i18n/battle-log";
 import { getEnglishPokemon, getPokemonToFind } from "@/lib/i18n/pokemon";
+import { countPokemonPlayed, matchArchetype } from "./archetype-match";
 
 const pngMap = {
   'bloodmoon ursaluna': 'ursaluna-bloodmoon',
@@ -82,6 +83,14 @@ export const determineArchetype = (log: string[], playerName: string, language: 
   const drawnCardsLines = log.filter((line, idx) => {
     return getIfLineCouldContainArchetype(line, playerName, language);
   });
+
+  // The meta table and the Pokemon vocabulary behind it are English, like the
+  // card catalog. Other languages keep the single-Pokemon reading below, which
+  // translates through PokemonStrings.
+  if (language === 'en') {
+    const matched = matchArchetype(countPokemonPlayed(drawnCardsLines));
+    if (matched) return matched;
+  }
 
   const pokemonToFind = getPokemonToFind(language);
   let archetype = pokemonToFind.find((targetMon) => drawnCardsLines.some((drawnCards) => drawnCards.toLowerCase().includes(targetMon.toLowerCase())));
