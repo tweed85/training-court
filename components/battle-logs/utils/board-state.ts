@@ -279,15 +279,49 @@ export function deriveBoardStates(battleLog: BattleLog): BoardState[] {
     const trimmed = detail.trim();
     if (!/^[•▪]/.test(trimmed)) return null;
     const names = trimmed.replace(/^[•▪\s]+/, '').split(',').map((n) => n.trim()).filter(Boolean);
-    return names.length === count ? names : null;
+    if (names.length !== count) return null;
+    // "• (Pokemon Tool) Brave Bangle: 30 damage" and "• 5 Pokemon: 150 damage"
+    // are damage breakdowns wearing the same bullet. Card names open with a
+    // letter or digit and never carry a colon.
+    if (!names.every((n) => /^[A-Z0-9]/.test(n) && !n.includes(':'))) return null;
+    return names;
   };
+
+  /**
+   * The counted hand events that a both-player effect emits twice. The verb
+   * identifies the shape so that a draw is never paired with a shuffle.
+   */
+  const COUNTED: { key: string; re: RegExp }[] = [
+    { key: 'bench', re: RE.benchUnknown },
+    { key: 'drew', re: RE.drewCount },
+    { key: 'discarded', re: RE.discardedCount },
+    { key: 'shuffled', re: RE.shuffledIntoDeck },
+    { key: 'bottom', re: RE.bottomOfDeck },
+  ];
+
+  const countedEvent = (raw: string | undefined): { key: string; actor: string } | null => {
+    if (!raw) return null;
+    const line = raw.replace(/^[\s\-•]+/, '').trim();
+    for (const { key, re } of COUNTED) {
+      const m = line.match(re);
+      if (m) return { key, actor: m[1] };
+    }
+    return null;
+  };
+
+  const opponentOf = (name: string): string =>
+    Object.keys(state).find((other) => other !== name) ?? name;
 
   /**
    * `named` carries the itemised list that followed this line, when the log
    * provided one. Every counted event prefers those identities and falls back
    * to an anonymous count only when the list is absent or disagrees.
+   *
+   * `asPlayer` redirects a counted event away from the player the line names.
+   * A both-player effect prints both halves under the actor's name, so the
+   * second half has to be booked against their opponent.
    */
-  const applyLine = (raw: string, named?: string[] | null): void => {
+  const applyLine = (raw: string, named?: string[] | null, asPlayer?: string): void => {
     const line = raw.replace(/^[\s\-•]+/, '').trim();
     if (!line) return;
 
@@ -415,7 +449,12 @@ export function deriveBoardStates(battleLog: BattleLog): BoardState[] {
     // otherwise be recorded as a card named "3 cards".
 
     m = line.match(RE.discardedFromPokemonCount);
-    if (m) { addUnknown(state[m[2]].discard, Number(m[1])); return; }
+    if (m) {
+      const discard = state[m[2]].discard;
+      if (named) for (const name of named) addKnown(discard, name);
+      else addUnknown(discard, Number(m[1]));
+      return;
+    }
 
     m = line.match(RE.discardedFromPokemonNamed);
     if (m) {
@@ -441,7 +480,7 @@ export function deriveBoardStates(battleLog: BattleLog): BoardState[] {
 
     m = line.match(RE.drewCount);
     if (m) {
-      const hand = state[m[1]].hand;
+      const hand = state[asPlayer ?? m[1]].hand;
       if (named) for (const name of named) addKnown(hand, name);
       else addUnknown(hand, Number(m[2]));
       return;
@@ -468,7 +507,7 @@ export function deriveBoardStates(battleLog: BattleLog): BoardState[] {
 
     m = line.match(RE.shuffledIntoDeck);
     if (m) {
-      const hand = state[m[1]].hand;
+      const hand = state[asPlayer ?? m[1]].hand;
       // Naming them matters: removeUnknown would clamp out the OLDEST known
       // cards, which is how identities we still hold went missing.
       if (named) for (const name of named) removeKnown(hand, name);
@@ -478,7 +517,7 @@ export function deriveBoardStates(battleLog: BattleLog): BoardState[] {
 
     m = line.match(RE.bottomOfDeck);
     if (m) {
-      const hand = state[m[1]].hand;
+      const hand = state[asPlayer ?? m[1]].hand;
       if (named) for (const name of named) removeKnown(hand, name);
       else removeUnknown(hand, Number(m[2]));
       return;
@@ -486,7 +525,7 @@ export function deriveBoardStates(battleLog: BattleLog): BoardState[] {
 
     m = line.match(RE.discardedCount);
     if (m) {
-      const player = state[m[1]];
+      const player = state[asPlayer ?? m[1]];
       if (named) {
         for (const name of named) {
           removeKnown(player.hand, name);
@@ -573,7 +612,10 @@ export function deriveBoardStates(battleLog: BattleLog): BoardState[] {
     for (const action of section.actions) {
       // The opening hand consumes its own details, so skip the flat pass for it.
       if (applyOpeningHand(action.title, action.details)) continue;
-      applyLine(action.title, listFor(action.title, action.details[0]));
+      // No list is offered to the title: every counted line in the corpus
+      // opens with "-", so getTurnActions files it as a detail, and a title
+      // claiming details[0] could only mis-consume some other action's bullet.
+      applyLine(action.title);
 
       // getTurnActions treats "drew 7 cards for the opening hand" as a
       // subaction indicator, so in the real corpus that line — and both
@@ -587,13 +629,24 @@ export function deriveBoardStates(battleLog: BattleLog): BoardState[] {
         const line = action.details[i];
         const names = listFor(line, action.details[i + 1]);
         applyLine(line, names);
+        let next = i + (names ? 2 : 1);
 
-        if (names) {
-          i += 1; // the itemised list belongs to the line just applied
-          // PTCG Live then repeats that counted line verbatim. Applying it a
-          // second time is what inflated every hand and discard count.
-          if (action.details[i + 1]?.trim() === line.trim()) i += 1;
+        // Judge, Iono and Unfair Stamp resolve for both players, and PTCG Live
+        // prints both halves under the acting player's name — the actor's
+        // first. Only the log owner's cards are ever itemised, so each half
+        // carries its own list or none, and the counts routinely differ.
+        // Reading the second half as a repeat of the first credits one player
+        // twice and leaves their opponent's hand untouched.
+        const event = countedEvent(line);
+        const second = event && countedEvent(action.details[next]);
+        if (event && second && second.key === event.key && second.actor === event.actor) {
+          const secondLine = action.details[next];
+          const secondNames = listFor(secondLine, action.details[next + 1]);
+          applyLine(secondLine, secondNames, opponentOf(event.actor));
+          next += secondNames ? 2 : 1;
         }
+
+        i = next - 1;
       }
     }
     flushPendingReveal();

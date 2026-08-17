@@ -2,10 +2,14 @@ import type { BattleLog, BattleLogTurn } from '../../components/battle-logs/util
 import { deriveBoardStates } from '../../components/battle-logs/utils/board-state';
 
 /**
- * PTCG Live emits a counted event twice: once followed by an itemised list of
- * the cards involved, then again as a bare repeat. These tests pin both halves
- * of that shape — the identities must be read off the list, and the repeat must
- * not be counted a second time.
+ * PTCG Live itemises the log owner's cards on a bullet line beneath the counted
+ * event that moved them. These tests pin that reading: the identities come off
+ * the list, and a list that does not agree with the count is refused rather
+ * than guessed at.
+ *
+ * Two-player effects, where a second counted line belongs to the opponent
+ * rather than repeating the first, are covered in
+ * board-state-both-player-effects.test.ts.
  */
 const action = (title: string, details: string[] = []) => ({ title, details });
 
@@ -45,7 +49,7 @@ describe('itemised draws name the cards', () => {
     expect(hand.known).toEqual(['Fan Rotom', 'Hoothoot', 'Basic Fire Energy', 'Dawn']);
   });
 
-  it('does not count the bare repeat that follows the list', () => {
+  it('does not fold a second counted line back into the same hand', () => {
     const hand = boardOf([
       action('ash played Professor.', [
         '- ash drew 4 cards.',
@@ -101,7 +105,7 @@ describe('itemised removals name the cards that left', () => {
   it('moves named discards into the discard pile', () => {
     const board = boardOf([
       action('ash played Professor.', ['- ash drew 2 cards.', '   • Iono, Arven']),
-      action('ash played Trash.', ['- ash discarded 2 cards.', '   • Iono, Arven']),
+      action("ash's Pikipek used Peck.", ['- ash discarded 2 cards.', '   • Iono, Arven']),
     ]);
     expect(board.hand.size).toBe(0);
     expect(board.discard.known).toEqual(['Iono', 'Arven']);
