@@ -53,6 +53,20 @@ export function removeKnown(zone: Zone, name: string): void {
   clamp(zone);
 }
 
+/**
+ * Drop a card's identity while leaving the count alone.
+ *
+ * For lines that reveal a card left the zone but whose arithmetic belongs to a
+ * different line — PTCGL prints both a placement and a plain play for one
+ * stadium card, and only one of them may decrement. Forgetting the name keeps a
+ * card that is demonstrably gone from rendering face-up, and the worst case is
+ * one card counted twice: an extra face-down slot, never a wrong face-up one.
+ */
+export function forgetKnown(zone: Zone, name: string): void {
+  const index = zone.known.indexOf(name);
+  if (index !== -1) zone.known.splice(index, 1);
+}
+
 export function removeUnknown(zone: Zone, count: number): void {
   zone.size -= count;
   clamp(zone);

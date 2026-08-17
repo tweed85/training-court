@@ -4,6 +4,7 @@ import {
   clearZone,
   cloneZone,
   emptyZone,
+  forgetKnown,
   removeKnown,
   removeUnknown,
   unknownCount,
@@ -50,6 +51,31 @@ describe('zone arithmetic', () => {
     addUnknown(z, 2);
     removeKnown(z, "Boss's Orders");
     expect(z).toEqual({ known: [], size: 1 });
+  });
+
+  it('forgetting a card drops the name and leaves the count alone', () => {
+    const z = emptyZone();
+    addKnown(z, 'Iono');
+    addKnown(z, 'Artazon');
+    forgetKnown(z, 'Artazon');
+    expect(z).toEqual({ known: ['Iono'], size: 2 });
+    expect(unknownCount(z)).toBe(1);
+  });
+
+  it('forgetting drops only the first copy', () => {
+    const z = emptyZone();
+    addKnown(z, 'Artazon');
+    addKnown(z, 'Artazon');
+    forgetKnown(z, 'Artazon');
+    expect(z).toEqual({ known: ['Artazon'], size: 2 });
+  });
+
+  it('forgetting a card that was never known changes nothing', () => {
+    const z = emptyZone();
+    addKnown(z, 'Iono');
+    addUnknown(z, 2);
+    forgetKnown(z, 'Artazon');
+    expect(z).toEqual({ known: ['Iono'], size: 3 });
   });
 
   it('never lets size go negative', () => {
